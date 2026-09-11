@@ -10,16 +10,16 @@ registers nine tools the model can call, and polls for releases in the
 background so a session says something when one lands.
 
 It is here because of what it is built on rather than what it does: Claude Code
-v2.1.267 ships a plugin runtime that no page of `code.claude.com/docs` mentions.
-Nothing in the 191-page docs corpus captured on 2026-09-09 names `modules`,
+v2.1.269 ships a plugin runtime that no page of `code.claude.com/docs` mentions.
+Nothing in the 192-page docs corpus captured on 2026-09-11 names `modules`,
 `surface`, `$.ui.render` or any of it.
 
 The build documents itself, though, and only once the flag is on: it carries a
 `plugin-authoring` skill and a `/plugin-types` command, both gated on the same
 switch as the runtime. `/plugin-types` writes `claude-code.d.ts` out of the
-running build - 312 KB of declarations, every event's input and result, every
+running build - 339 KB of declarations, every event's input and result, every
 method on `$`, every element's props. `types/claude-code.d.ts` here is the copy
-v2.1.267 wrote. **It is the authority; the notes below are the map to it.**
+v2.1.269 wrote. **It is the authority; the notes below are the map to it.**
 
 ## Provenance
 
@@ -254,12 +254,12 @@ walk rather than a download.
 
 ## The types
 
-`types/claude-code.d.ts` is the plugin API itself: 312 KB of declarations
+`types/claude-code.d.ts` is the plugin API itself: 339 KB of declarations
 covering every event's input and result, every method on `$`, and every
 element's props. **It is the authority and this README is the map to it.**
 
 Nobody wrote it. Claude Code writes it out of the running build when you type
-`/plugin-types`, and the copy here is what 2.1.267 wrote. It is early access
+`/plugin-types`, and the copy here is what 2.1.269 wrote. It is early access
 and may move between releases without notice, so regenerate against your own
 build rather than trusting this file's age. `types/README.md` has how, and the
 terms it is published under, which are not this repository's MIT.
@@ -268,5 +268,6 @@ terms it is published under, which are not this repository's MIT.
 
 Unannounced and undocumented, so the shape can change in any release, and a
 reader on a build without the flag sees nothing at all. Verified on v2.1.267
-only, on Linux, on the `terminal` surface. The `desktop` surface, the `surface`
-module and `Client` elements are read from the bundle and have not been run.
+and v2.1.269, on Linux, on the `terminal` surface. The `desktop` and `mobile`
+surfaces, the `surface` module and `Client` elements are read from the bundle
+and the declarations and have not been run.
