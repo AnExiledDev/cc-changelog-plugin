@@ -1,0 +1,11 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "cc-changelog",
+  "version": "0.1.0",
+  "description": "The unofficial Claude Code changelog, in your terminal",
+  "author": {
+    "name": "AnExiledDev",
+    "email": "696222+AnExiledDev@users.noreply.github.com"
+  },
+  "homepage": "https://changelogs.core-directive.com"
+}

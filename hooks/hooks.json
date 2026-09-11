@@ -1,0 +1,4 @@
+{
+  "description": "Draws the unofficial Claude Code changelog in a pane",
+  "modules": ["module.js"]
+}
