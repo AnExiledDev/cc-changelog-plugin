@@ -4,8 +4,9 @@
  * Three surfaces over one origin, `https://changelogs.core-directive.com`:
  *
  * - `/whatsnew` opens a pane with tabs. Releases lists every item in the feed
- *   and the engine scrolls it; picking one opens its summary; Search shows
- *   whatever the last search tool call found.
+ *   and the engine scrolls it; picking one opens its summary; Search is a
+ *   field and three filters over `/search.json`, and shows the model's own
+ *   searches too; Entry reads one entry in full, with its code drawn as code.
  * - Nine tools the model may call: five over the changelog (what exists, what
  *   one release holds, one entry in full, a release as a document, and a
  *   search across all of them), and one apiece over the four corpora the
@@ -138,6 +139,32 @@ const CACHE_ENTRIES = 40;
  * is the site rather than a terminal pane.
  */
 const DETAIL_ENTRIES = 8;
+
+/**
+ * How many hits one search from the pane asks for.
+ *
+ * The pane scrolls, so this is not a height either; it is the window the site
+ * caps at forty, and half of it is as far down a list as a reader goes before
+ * they narrow the terms. The model's own searches pick their own limit.
+ */
+const PANE_HITS = 20;
+
+/** The site's four tiers, in the order the filter offers them. */
+const TIERS = ["use", "notice", "soon", "internal"];
+
+/** The value every filter's "any" option carries; the site sees none. */
+const ANY = "";
+
+/**
+ * What the reader may hand the model from an entry, and what each writes into
+ * the prompt box. Filled rather than submitted: a press in a pane should never
+ * spend a turn on its own, so the reader sees the prompt and sends it.
+ */
+const ASKS = [
+    { label: "Explain it", prompt: (entry) => `Explain what this Claude Code change does and whether it affects me: ${entry.url}` },
+    { label: "Show me how to use it", prompt: (entry) => `Show me how to use this Claude Code change, with a concrete example: ${entry.url}` },
+    { label: "Never mind", prompt: undefined },
+];
 
 /** @type {import('claude-code').Register} */
 export const register = (on) => {
@@ -282,6 +309,7 @@ const tabs = ($, e, view, feed) => {
         { tab: "releases", label: `Releases (${feed.items.length})` },
         ...(detail === undefined ? [] : [{ tab: "detail", label: detail.tabLabel }]),
         { tab: "search", label: "Search" },
+        ...(view.entry === undefined ? [] : [{ tab: "entry", label: "Entry" }]),
     ];
 
     return Box({
@@ -312,7 +340,11 @@ const bodyFor = async ($, e, view, feed, columns) => {
     }
 
     if (view.tab === "search") {
-        return searchTab($, e, view, columns);
+        return searchTab($, e, view, feed, columns);
+    }
+
+    if (view.tab === "entry") {
+        return entryReader($, e, view, columns);
     }
 
     return releaseList($, e, view, feed, columns);
@@ -423,7 +455,7 @@ const behindHint = (items, version) => {
  * the whole release, 207 KB of it for eight headings and a paragraph.
  */
 const releaseDetail = async ($, e, view, feed, columns) => {
-    const { Box, Text } = $.ui.resolve(e);
+    const { Box, Button, Text } = $.ui.resolve(e);
     const item = itemOf(view, feed);
 
     if (item === undefined) {
@@ -480,7 +512,14 @@ const releaseDetail = async ($, e, view, feed, columns) => {
                 paddingLeft: 2,
                 width: columns,
                 children: [
-                    Text({ key: `h${index}`, wrap: "wrap", children: entry.heading ?? entry.anchor }),
+                    Button({
+                        key: `read-${index}`,
+                        label: entry.heading ?? entry.anchor,
+                        plain: true,
+                        onPress: () => {
+                            void openEntry($, { ...entry, version: item.version });
+                        },
+                    }),
                     Box({
                         key: `gb${index}`,
                         paddingLeft: 2,
@@ -605,52 +644,482 @@ const linkOrText = ($, e, key, href, label) => {
 };
 
 /**
- * What the last `search` tool call found.
+ * A field, three filters, and the hits.
  *
- * The pane has no text field of its own on purpose: the search that matters
- * here is the model's, and this is where its reader can see what it read.
+ * The field submits and nothing else: `onInput` would run this module on every
+ * keystroke and the search it feeds is one request per Enter, which is what
+ * the site's throttle expects of a person. The filters take effect on the
+ * terms already entered, so narrowing a search is one pick rather than a pick
+ * and a retype. The model's own `search` calls land here too, terms and
+ * filters and all, so the tab is one place for both readers.
  */
-const searchTab = ($, e, view, columns) => {
-    const { Box, Text } = $.ui.resolve(e);
-    const search = view.search;
+const searchTab = async ($, e, view, feed, columns) => {
+    const { Box, Input, Text } = $.ui.resolve(e);
+    const search = view.search ?? {};
+    const results = search.results ?? [];
 
-    if (search === undefined || search.results.length === 0) {
+    const field = Input({
+        key: "q",
+        label: "Search",
+        placeholder: "terms, every one of which an entry must carry",
+        value: search.query ?? "",
+        submitLabel: "search",
+        onSubmit: (value) => {
+            void runPaneSearch($, { ...search, query: text(value) });
+        },
+    });
+
+    const filters = await filterRow($, e, search, feed);
+
+    if (search.error !== undefined) {
+        return [field, filters, Text({ key: "err", color: "red", wrap: "wrap", children: search.error })];
+    }
+
+    if (search.query === undefined) {
         return [
+            field,
+            filters,
             Text({
                 key: "empty",
                 dimColor: true,
                 wrap: "wrap",
-                children:
-                    search === undefined
-                        ? "Nothing searched yet. Ask me to search the changelog and the hits land here."
-                        : `No entry carries every term of "${search.query}".`,
+                children: "Type terms and press Enter, or ask me to search and the hits land here.",
             }),
         ];
     }
 
+    if (search.pending === true) {
+        return [field, filters, Text({ key: "wait", dimColor: true, children: `Searching for "${search.query}"…` })];
+    }
+
+    if (results.length === 0) {
+        return [
+            field,
+            filters,
+            Text({ key: "none", dimColor: true, wrap: "wrap", children: `No entry carries every term of "${search.query}".` }),
+        ];
+    }
+
+    const shown = search.total === undefined || search.total <= results.length ? "" : ` of ${search.total}`;
+
     return [
-        Text({ key: "q", dimColor: true, children: `"${search.query}", ${search.results.length} entries` }),
-        ...search.results.map((hit, index) =>
+        field,
+        filters,
+        Text({ key: "count", dimColor: true, children: `"${search.query}", ${results.length}${shown} entries` }),
+        ...results.map((hit, index) => searchHit($, e, hit, index, columns)),
+    ];
+};
+
+/**
+ * One hit: a button that reads it here, a link that opens it there.
+ *
+ * Both, because half the releases search answers are older than the 25 items
+ * the feed carries, so there is no release tab to reach the entry through; the
+ * reader is the way in from here.
+ */
+const searchHit = ($, e, hit, index, columns) => {
+    const { Box, Button, Text } = $.ui.resolve(e);
+
+    return Box({
+        key: `hit-${index}`,
+        flexDirection: "column",
+        marginTop: 1,
+        width: columns,
+        children: [
+            Button({
+                key: `hit-read-${index}`,
+                label: `v${hit.version}  ${hit.heading}`,
+                plain: true,
+                onPress: () => {
+                    void openEntry($, hit);
+                },
+            }),
             Box({
-                key: `hit-${index}`,
-                flexDirection: "column",
-                marginTop: 1,
+                key: `hit-meta-${index}`,
+                flexDirection: "row",
+                gap: 2,
+                paddingLeft: 4,
                 children: [
-                    Text({ key: `hit-h-${index}`, wrap: "wrap", children: `v${hit.version}  ${hit.heading}` }),
-                    // A link rather than a button: a hit is an entry, and half
-                    // the releases search answers are older than the 25 items
-                    // the feed carries, so there is often no tab to open.
-                    linkOrText($, e, `hit-link-${index}`, hit.url, "open"),
-                    Text({
-                        key: `hit-sum-${index}`,
-                        dimColor: true,
-                        wrap: "wrap",
-                        children: `    ${clip(hit.summary ?? "", columns * 2)}`,
-                    }),
+                    Text({ key: `hit-tier-${index}`, dimColor: true, children: `${hit.tier ?? "?"} · ${hit.area ?? "?"}` }),
+                    linkOrText($, e, `hit-link-${index}`, hit.url, "open on the site"),
                 ],
             }),
-        ),
+            Text({
+                key: `hit-sum-${index}`,
+                dimColor: true,
+                wrap: "wrap",
+                children: `    ${clip(hit.summary ?? "", columns * 2)}`,
+            }),
+        ],
+    });
+};
+
+/**
+ * Tier, area and release, each a `Select` with "any" first.
+ *
+ * The areas are the site's own, read off the newest release's facets rather
+ * than spelled here, because the site names them and renames them; the list
+ * is one entry's worth of that route and is cached like everything else. Until
+ * it arrives the area filter offers only "any", which is what it was set to.
+ */
+const filterRow = async ($, e, search, feed) => {
+    const { Box, Select } = $.ui.resolve(e);
+    const areas = await knownAreas($, feed);
+    const versions = feed.items.map((item) => item.version).filter((version) => version !== undefined);
+
+    const pick = (name) => (value) => {
+        void runPaneSearch($, { ...search, [name]: value === ANY ? undefined : value });
+    };
+
+    return Box({
+        key: "filters",
+        flexDirection: "row",
+        gap: 2,
+        marginTop: 1,
+        marginBottom: 1,
+        children: [
+            Select({
+                key: "tier",
+                label: "tier",
+                options: withAny(TIERS),
+                value: search.tier ?? ANY,
+                onSelect: pick("tier"),
+            }),
+            Select({
+                key: "area",
+                label: "area",
+                options: withAny(areas),
+                value: areas.includes(search.area) ? search.area : ANY,
+                onSelect: pick("area"),
+            }),
+            Select({
+                key: "version",
+                label: "release",
+                options: withAny(versions),
+                value: versions.includes(search.version) ? search.version : ANY,
+                onSelect: pick("version"),
+            }),
+        ],
+    });
+};
+
+const withAny = (values) => [{ value: ANY, label: "any" }, ...values.map((value) => ({ value }))];
+
+/** The areas the newest release names, busiest first, or none yet. */
+const knownAreas = async ($, feed) => {
+    const newest = feed.items.find((item) => item.version !== undefined)?.version;
+
+    if (newest === undefined) {
+        return [];
+    }
+
+    const base = await baseUrl($);
+    const facets = await paneJson($, `${base}/v/${newest}/entries.json?limit=1`);
+
+    return (facets?.facets?.areas ?? []).map((area) => area.value).filter((value) => typeof value === "string");
+};
+
+/**
+ * Runs one search from the pane and draws what it found.
+ *
+ * Outside a render, so the fetch is awaited rather than claimed: the frame in
+ * between says "Searching" and the answer asks for the next one. Terms cleared
+ * clears the hits too, filters kept, because a reader emptying the field means
+ * to start again and not to search the whole site for nothing.
+ */
+const runPaneSearch = async ($, search) => {
+    const { query: terms, tier, area, version } = search;
+
+    if (terms === undefined) {
+        await setView($, { tab: "search", search: { tier, area, version } });
+        $.ui.invalidate("ui.render");
+
+        return;
+    }
+
+    await setView($, { tab: "search", search: { query: terms, tier, area, version, pending: true } });
+    $.ui.invalidate("ui.render");
+
+    const base = await baseUrl($);
+    const url = `${base}/search.json?${query({ q: terms, tier, area, version, limit: PANE_HITS })}`;
+    const response = await fetchJson($, url);
+    const found = response.ok === true ? searchFound(terms, response.json, { tier, area, version }) : { query: terms, tier, area, version, error: problem(url, response).error };
+
+    await setView($, { tab: "search", search: found });
+    $.ui.invalidate("ui.render");
+};
+
+/** The pane's view of one search answer, from the pane or from the model. */
+const searchFound = (terms, answer, filter) => ({
+    query: terms,
+    tier: filter.tier,
+    area: filter.area,
+    version: filter.version,
+    results: answer?.results ?? [],
+    total: answer?.total,
+});
+
+/**
+ * Opens one entry in the reader tab, off a search hit or a detail row.
+ *
+ * Only the address is kept: the document is fetched by the frame that draws
+ * it, through the same cache the tools fill, so an entry the model just read
+ * costs nothing to open.
+ */
+const openEntry = async ($, entry) => {
+    await setView($, {
+        tab: "entry",
+        entry: {
+            version: entry.version,
+            anchor: entry.anchor,
+            heading: entry.heading,
+            url: entry.url,
+        },
+    });
+    $.ui.invalidate("ui.render");
+};
+
+/**
+ * One entry in full: its markdown drawn as paragraphs, lists and `Code`.
+ *
+ * `Code` rather than dim text for the fences, because the highlighter is the
+ * engine's and a settings snippet or a shell line reads as what it is. The
+ * blocks are split here and not on the site: the site serves markdown to
+ * everyone and the pane is the one client that cannot draw it as markdown.
+ */
+const entryReader = async ($, e, view, columns) => {
+    const { Box, Button, Text } = $.ui.resolve(e);
+    const entry = view.entry;
+
+    if (entry === undefined) {
+        return [Text({ key: "none", dimColor: true, children: "Pick an entry from Search or a release first." })];
+    }
+
+    const base = await baseUrl($);
+    const document = VERSION.test(String(entry.version)) && ANCHOR.test(String(entry.anchor))
+        ? await paneJson($, `${base}/v/${entry.version}/e/${entry.anchor}.json`)
+        : undefined;
+
+    const head = [
+        Text({ key: "title", bold: true, wrap: "wrap", children: document?.heading ?? entry.heading ?? entry.anchor }),
+        Text({
+            key: "meta",
+            dimColor: true,
+            children: `v${entry.version}${document === undefined ? "" : `  ·  ${document.tier ?? "?"}  ·  ${document.area ?? "?"}`}`,
+        }),
     ];
+
+    const foot = Box({
+        key: "foot",
+        flexDirection: "row",
+        gap: 2,
+        marginTop: 1,
+        children: [
+            Button({
+                key: "ask",
+                label: "Ask me about it",
+                onPress: () => {
+                    void askAboutEntry($, { ...entry, heading: document?.heading ?? entry.heading });
+                },
+            }),
+            linkOrText($, e, "open", entry.url ?? `${base}/v/${entry.version}/e/${entry.anchor}`, "Open on the site"),
+        ],
+    });
+
+    if (document === undefined) {
+        return [...head, Text({ key: "wait", dimColor: true, children: "Fetching the entry…" }), foot];
+    }
+
+    // The first block is the heading the head already drew.
+    const blocks = markdownBlocks(document.markdown ?? "").filter((block, index) => !(index === 0 && block.kind === "heading"));
+
+    return [...head, ...blocks.map((block, index) => drawBlock($, e, block, index, columns)), foot];
+};
+
+/**
+ * Markdown as the pane can draw it: code, headings, and paragraphs.
+ *
+ * Not a markdown parser. Code is the one construct a `Text` cannot carry,
+ * because a snippet's own indentation has to survive the wrap; a fence is
+ * code, and so is a paragraph that is one whole backtick span, which is how
+ * the site's entry JSON serves a fenced usage line. A heading, or a paragraph
+ * that is one bold label (`**What**`), is set apart. Everything else is a
+ * paragraph as `paragraphsOf` already splits one, list bullets included, with
+ * the bold markers taken off because a `Text` would draw the asterisks.
+ */
+const markdownBlocks = (markdown) => {
+    const blocks = [];
+    const lines = String(markdown).replace(/\r\n/g, "\n").split("\n");
+    let fence;
+    let prose = [];
+
+    const flush = () => {
+        for (const part of paragraphsOf(prose.join("\n"))) {
+            blocks.push(proseBlock(part));
+        }
+
+        prose = [];
+    };
+
+    for (const line of lines) {
+        const opening = fence === undefined ? line.match(/^\s*(`{3,}|~{3,})\s*([A-Za-z0-9_+-]*)/) : null;
+
+        if (opening !== null) {
+            flush();
+            fence = { marker: opening[1], language: opening[2] === "" ? undefined : opening[2], source: [] };
+
+            continue;
+        }
+
+        if (fence !== undefined) {
+            if (line.trim().startsWith(fence.marker)) {
+                blocks.push({ kind: "code", language: fence.language, source: fence.source.join("\n") });
+                fence = undefined;
+            } else {
+                fence.source.push(line);
+            }
+
+            continue;
+        }
+
+        prose.push(line);
+    }
+
+    if (fence !== undefined) {
+        blocks.push({ kind: "code", language: fence.language, source: fence.source.join("\n") });
+    }
+
+    flush();
+
+    return blocks;
+};
+
+/** One paragraph of prose as the block it is: a heading, a span of code, or text. */
+const proseBlock = (part) => {
+    const heading = part.match(/^#{1,6}\s+(.+)$/s) ?? part.match(/^\*\*([^*]+)\*\*:?$/);
+
+    if (heading !== null) {
+        return { kind: "heading", text: heading[1].trim() };
+    }
+
+    const span = part.match(/^`([^`]+)`$/s);
+
+    if (span !== null) {
+        return { kind: "code", language: undefined, source: span[1].trim() };
+    }
+
+    return { kind: "paragraph", text: part.replace(/\*\*([^*]+)\*\*/g, "$1") };
+};
+
+/**
+ * One block of an entry.
+ *
+ * `Code` takes at most ten thousand characters and only tab and newline as
+ * control characters, and a prop it refuses refuses the whole tree; so the
+ * source is cut and scrubbed here rather than trusted. Its own wrap draws
+ * the continuation row over the row under it (2.1.269: the element wraps but
+ * measures itself unwrapped), so long lines are broken here at words, well
+ * inside the room, and the element never has a line to wrap.
+ */
+const drawBlock = ($, e, block, index, columns) => {
+    const { Box, Code, Text } = $.ui.resolve(e);
+    const key = `b${index}`;
+
+    if (block.kind === "code") {
+        return Box({
+            key,
+            flexDirection: "column",
+            marginTop: 1,
+            paddingLeft: 2,
+            width: columns,
+            children: [Code({ key: `${key}-c`, source: codeSource(block.source, columns - CODE_MARGIN), language: block.language })],
+        });
+    }
+
+    if (block.kind === "heading") {
+        return Box({
+            key,
+            marginTop: 1,
+            width: columns,
+            children: [Text({ key: `${key}-t`, bold: true, wrap: "wrap", children: block.text })],
+        });
+    }
+
+    return paragraph($, e, key, block.text, columns);
+};
+
+const CODE_CHARS = 10000;
+
+/**
+ * Columns kept clear at the right of a code block: the pane's own padding,
+ * the block's indent, and room for the frame the pane is drawn in.
+ */
+const CODE_MARGIN = 8;
+
+const codeSource = (raw, width) => {
+    const clean = String(raw).replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
+    const wrapped = clean
+        .split("\n")
+        .flatMap((line) => brokenAt(line, Math.max(width, 20)))
+        .join("\n");
+
+    return wrapped.length <= CODE_CHARS ? wrapped : `${wrapped.slice(0, CODE_CHARS - 2)}\n…`;
+};
+
+/**
+ * One line as pieces of at most `width` characters, broken at a space where
+ * one falls in the last third of the room and mid-word otherwise.
+ */
+const brokenAt = (line, width) => {
+    const pieces = [];
+    let rest = line;
+
+    while (rest.length > width) {
+        const space = rest.lastIndexOf(" ", width);
+        const cut = space > width / 2 ? space : width;
+
+        pieces.push(rest.slice(0, cut));
+        rest = rest.slice(cut).replace(/^ +/, "");
+    }
+
+    pieces.push(rest);
+
+    return pieces;
+};
+
+/**
+ * Hands an entry to the model, once the reader has said how.
+ *
+ * `$.ui.ask` is the engine's own dialog, so it reads like every other question
+ * the session asks; the answer picks a prompt and `$.prompt.fill` puts it in
+ * the box, cursor at the end, for the reader to send or edit. Nothing is
+ * submitted from here: a pane press must never spend a turn by itself. A
+ * dismissed dialog rejects, and that is the reader saying never mind.
+ */
+const askAboutEntry = async ($, entry) => {
+    let answer;
+
+    try {
+        answer = await $.ui.ask(`What do you want to know about "${clip(entry.heading ?? entry.anchor, 60)}"?`, {
+            options: ASKS.map((ask) => ask.label),
+            header: "Changelog",
+        });
+    } catch {
+        return;
+    }
+
+    const chosen = ASKS.find((ask) => ask.label === answer);
+    const prompt = chosen === undefined ? (text(answer) === undefined ? undefined : `${answer}\n\nAbout this Claude Code change: ${entry.url}`) : chosen.prompt?.(entry);
+
+    if (prompt === undefined) {
+        return;
+    }
+
+    const { isFilled } = await $.prompt.fill({ text: prompt });
+
+    if (isFilled !== true) {
+        $.ui.toast("The prompt box is busy; the question was not written into it.");
+    }
 };
 
 /* -------------------------------------------------------------------------
@@ -746,12 +1215,13 @@ const searchTool = async ($, e) => {
     }
 
     const answer = response.json ?? {};
-    const results = answer.results ?? [];
 
     // Kept for the pane, which is the reader's own view of what the model just
-    // read. The tab's contents are this and nothing else.
-    const view = (await $.store.get(VIEW_KEY)) ?? { tab: "releases" };
-    await $.store.set(VIEW_KEY, { ...view, search: { query: terms, results } });
+    // read: the same shape the pane's own field writes, filters included, so
+    // the reader can narrow the model's search from where it left off.
+    await setView($, {
+        search: searchFound(terms, answer, { tier: text(e.tier), area: text(e.area), version: within.version }),
+    });
     $.ui.invalidate("ui.render");
 
     return answer;
