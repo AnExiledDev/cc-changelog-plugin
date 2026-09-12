@@ -5,9 +5,10 @@
 
 `/whatsnew` opens a pane in the terminal listing every release in
 `https://changelogs.core-directive.com/feed.json`, with a tab strip, a search
-tab, and a line at the top saying how far behind the running build is. It also
-registers nine tools the model can call, and polls for releases in the
-background so a session says something when one lands.
+field with three filters, a reader that draws one entry in full, and a line at
+the top saying how far behind the running build is. It also registers nine
+tools the model can call, and polls for releases in the background so a
+session says something when one lands.
 
 It is here because of what it is built on rather than what it does: Claude Code
 v2.1.269 ships a plugin runtime that no page of `code.claude.com/docs` mentions.
@@ -59,12 +60,41 @@ refused, including a tree that did not validate.
   dozen. A `Pane` scrolls itself, so the list does not need paging: the engine
   draws `↑↓ pgup pgdn scroll · tab moves · esc back to the prompt` and owns the
   offset. Nothing in the module tracks scroll.
-- **Three tabs.** `Releases (25)`, `Search`, and a third that appears once a
-  release is opened, labelled with its version. Tab state is one value in
-  `$.store` under `view`, so the pane reopens where the reader left it. The
-  detail tab keys on the feed item's `id`, not its version: blog posts in the
-  same feed carry no version, and matching on one gave every versionless item
-  the same phantom tab.
+- **Four tabs.** `Releases (25)`, `Search`, one that appears once a release
+  is opened, labelled with its version, and `Entry` once an entry has been
+  opened. Tab state is one value in `$.store` under `view`, so the pane
+  reopens where the reader left it. The detail tab keys on the feed item's
+  `id`, not its version: blog posts in the same feed carry no version, and
+  matching on one gave every versionless item the same phantom tab.
+- **Search is a field and three filters.** An `Input` submits on Enter and
+  never on keystroke, so one search is one request to `/search.json`; three
+  `Select`s narrow it by tier, by area and by release, and a pick re-runs the
+  terms already entered. The tiers are the site's four, the releases are the
+  feed's, and the areas are read off the newest release's `entries.json`
+  facets rather than spelled in the module, so a renamed area renames itself.
+  The model's own `search` calls land in the same tab, terms and filters
+  included, so a reader can narrow what the model just found from where it
+  left off. Every hit is a button that opens the entry here and a `Link` that
+  opens it on the site.
+- **The entry reader** draws `/v/{version}/e/{anchor}.json` in full: the
+  heading, its tier and area, then its markdown split into headings,
+  paragraphs and `Code`. The site serves a fenced usage line as one backtick
+  span, so a paragraph that is one whole span is drawn as code too, through
+  the engine's own highlighter. Entries open from a search hit or from any row
+  of a release's "What changed" list. Under the text sit an `Ask me about it`
+  button and the link to the page.
+- **`Ask me about it` is `$.ui.ask`.** It raises the engine's own
+  AskUserQuestion dialog with three choices, and the pick is written into the
+  prompt box with `$.prompt.fill`, cursor at the end, for the reader to send
+  or edit. Nothing is submitted from the pane: a press must never spend a turn
+  on its own. A dismissed dialog rejects, which the module reads as "never
+  mind".
+- **The version line is `$.process.run`.** Nothing on `$` says which Claude
+  Code is running, so the module runs `claude --version` once per module
+  environment with a five-second timeout and reads the version out of what it
+  prints. Every failure, from no `claude` on PATH to a sandbox that refuses
+  the spawn, is answered with no line rather than an error, because the hint
+  is a nicety and the list is the feature.
 - **A poll.** `session.start` reads the feed once, remembers the versions it
   saw, and `$.clock.every(30 min)` re-reads it. A version the session has not
   seen raises `$.ui.toast` and sets `$.ui.status`, both without starting a
@@ -195,7 +225,7 @@ then confirmed by running it, except where it says otherwise.
   `Button`, `Input`, `Select`, `Link`, `Code`, `Client`, `Svg`. Nothing else is
   an element.
 
-## Three things that cost a run each
+## Four things that cost a run each
 
 - **Children go in `props.children`, not as trailing arguments.**
   `Box({ children: [...] })` draws; `Box({}, child, child)` returns a tree with
@@ -212,6 +242,13 @@ then confirmed by running it, except where it says otherwise.
 - **A registered command must be answered.** A `command.run` hook that calls
   `next(e)` instead of returning `{ text }` makes Claude Code print
   *"cc-changelog registered /whatsnew but no command.run hook answered it"*.
+
+- **`Code` wraps a long line and then draws the continuation row over the row
+  under it** (2.1.269, terminal surface). The declaration promises `wrap:
+  'wrap'` by default and the element does wrap; it just measures itself
+  unwrapped, so a wrapped line garbles the block below. The module breaks
+  code lines itself, at words, eight columns inside the pane's width, so the
+  element never has a line to wrap.
 
 ## What a pane render carries
 
