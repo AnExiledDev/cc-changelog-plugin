@@ -7,12 +7,14 @@
  *   and the engine scrolls it; picking one opens its summary; Search is a
  *   field and three filters over `/search.json`, and shows the model's own
  *   searches too; Entry reads one entry in full, with its code drawn as code.
- * - Nine tools the model may call: five over the changelog (what exists, what
+ * - Ten tools the model may call: five over the changelog (what exists, what
  *   one release holds, one entry in full, a release as a document, and a
- *   search across all of them), and one apiece over the four corpora the
- *   site had only ever served as HTML: the mined name inventory, the
- *   captured documentation, the owner's own writing, and the stock injected
- *   tool descriptions. Every one of them is windowed by the server.
+ *   search across all of them), one apiece over the four corpora the site
+ *   had only ever served as HTML (the mined name inventory, the captured
+ *   documentation, the owner's own writing, and the stock injected tool
+ *   descriptions), and one over the plugin runtime's own API, the surface
+ *   this module is written against. Every one of them is windowed by the
+ *   server.
  * - A poll that toasts when a release the reader has not seen appears.
  *
  * Everything that leaves this module goes through `fetchJson` / `fetchText`,
@@ -73,6 +75,48 @@ const VERSION = /^[0-9]+\.[0-9]+\.[0-9]+$/;
 
 /** An entry's anchor, matching the route's own constraint. */
 const ANCHOR = /^[a-z0-9][a-z0-9-]{0,79}$/;
+/**
+ * The plugin runtime's own API: every noun and verb on `$`, every event a
+ * hook can take, every declared type, mined out of the shipped build.
+ *
+ * Two routes behind one tool, the same shape as `reference`: `q` and `page`
+ * narrow the index, and the `page` and `anchor` a row carries read one symbol
+ * in full. The site does the cutting. Its whole-surface document is half a
+ * megabyte, which is exactly what a tool answer must never be, so nothing
+ * here fetches it; an event's payload and result types arrive inlined under
+ * the event, which is the one question the index rows could not answer.
+ */
+const modsApiTool = async ($, e) => {
+    const base = await baseUrl($);
+    const page = text(e.page)?.toLowerCase();
+    const anchor = text(e.anchor);
+
+    if (page !== undefined && MODS_PAGES.includes(page) !== true) {
+        return { error: `\`${page}\` is not a Mods API page.`, allowed: MODS_PAGES };
+    }
+
+    if (anchor !== undefined) {
+        if (page === undefined) {
+            return { error: "An `anchor` needs its `page` too; the index answers both at once." };
+        }
+
+        if (MODS_ANCHOR.test(anchor) !== true) {
+            return { error: `\`${anchor}\` is not a symbol anchor; they read like \`t-sessionratelimit\`.` };
+        }
+
+        return fetched($, `${base}/reference/mods/api/${page}/${anchor}.json`);
+    }
+
+    return fetched(
+        $,
+        `${base}/reference/mods/api/symbols.json?${query({
+            q: text(e.q),
+            page,
+            limit: bounded(e.limit, 25, 1, MODS_LIMIT),
+            offset: bounded(e.offset, 0, 0, MAX_OFFSET),
+        })}`,
+    );
+};
 
 /**
  * A reference name's slug, a blog post's slug and a documentation corpus key,
@@ -90,6 +134,15 @@ const DOC_PATH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const PROMPT_TOOL = /^[A-Za-z][A-Za-z0-9_]{0,79}$/;
 
 /**
+ * A Mods API symbol's anchor and the three pages one can sit on, matching
+ * the site's route constraints. An anchor is the HTML page's own fragment
+ * (`t-sessionratelimit`, `e-session-measure`, `v-session-usage`), which is
+ * what the index hands out and the only thing the symbol route takes.
+ */
+const MODS_ANCHOR = /^[a-z][a-z0-9-]{0,199}$/;
+const MODS_PAGES = ["engine", "events", "types"];
+
+/**
  * The site's own caps, restated so a bad argument is a smaller answer rather
  * than a 422 the model has to read and retry.
  */
@@ -97,6 +150,7 @@ const SEARCH_LIMIT = 40;
 const RELEASES_LIMIT = 100;
 const ENTRIES_LIMIT = 200;
 const REFERENCE_LIMIT = 100;
+const MODS_LIMIT = 100;
 const DOCS_PAGES_LIMIT = 200;
 const DOCS_HITS_LIMIT = 50;
 const BLOG_LIMIT = 100;
@@ -175,7 +229,7 @@ export const register = (on) => {
         });
 
         // One table, read twice: here to declare the tools and below to hook
-        // the calls. Nine names drifting apart in two places is the bug this
+        // the calls. Ten names drifting apart in two places is the bug this
         // shape cannot have.
         for (const tool of TOOLS) {
             await $.tool.register({
@@ -260,6 +314,10 @@ export const register = (on) => {
 
     on("tool.call", { tool: "mcp__cc-changelog__prompts" }, async ($, e) => {
         return { result: asToolResult(await promptsTool($, e)) };
+    });
+
+    on("tool.call", { tool: "mcp__cc-changelog__modsapi" }, async ($, e) => {
+        return { result: asToolResult(await modsApiTool($, e)) };
     });
 };
 
@@ -1642,7 +1700,9 @@ const TOOLS = [
             "documentation pages that mention it. Pass `q` to search by part of a name; pass the " +
             "`family` and `slug` a hit carries to read one in full. Given neither, it lists the " +
             "families and says which build the inventory was mined from. `in_current_build` is " +
-            "scoped to that mined build, which trails the newest release by several versions.",
+            "scoped to that mined build, which trails the newest release by several versions. " +
+            "For the plugin runtime's own API (`$.session.usage`, `session.measure`, " +
+            "`SessionRateLimit`) use `modsapi` instead: this inventory holds names, not shapes.",
         inputSchema: {
             type: "object",
             properties: {
@@ -1737,6 +1797,43 @@ const TOOLS = [
                 },
                 section: { type: "string", description: "A heading from the description's `sections`." },
                 limit: { type: "number", description: "At most this many tools (1-100, default 50)." },
+                ...PAGING,
+            },
+        },
+    },
+    {
+        name: "modsapi",
+        description:
+            "The Claude Code plugin runtime's own API, mined out of the newest shipped build: " +
+            "every noun and verb on `$` (`$.session.usage`, `$.model.complete`), every event a " +
+            "hook can be registered for (`session.measure`, `turn.step`), and every declared " +
+            "type (`SessionRateLimit`, `ContextApiUsage`), with its signature, doc comment and " +
+            "declaration text verbatim. Pass `q` to search by part of a name, `page` (`engine`, " +
+            "`events`, `types`) to narrow, and the `page` and `anchor` a row carries to read one " +
+            "symbol in full. An event answers with the declarations of what arrives and what may " +
+            "be returned inlined under it; every answer names the other `types` it mentions, with " +
+            "their anchors, so a shape is one call away. This is the surface the `reference` " +
+            "tool's `hook` family only names and the `docs` corpus does not describe at all.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                q: {
+                    type: "string",
+                    description:
+                        "Part of a symbol's name, as `RateLimit`, `session.` or `$.ui`. Matched " +
+                        "anywhere in the name, case-insensitively; doc text is not searched.",
+                },
+                page: {
+                    type: "string",
+                    description:
+                        "`engine` (nouns and verbs on `$`), `events` (what a hook can take) or " +
+                        "`types` (declarations). Narrows a search, or lists that page on its own.",
+                },
+                anchor: {
+                    type: "string",
+                    description: "One symbol's `anchor`, as answered by a search. Needs `page` with it.",
+                },
+                limit: { type: "number", description: "At most this many symbols (1-100, default 25)." },
                 ...PAGING,
             },
         },
