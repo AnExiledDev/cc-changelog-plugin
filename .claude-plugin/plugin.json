@@ -1,7 +1,7 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "cc-changelog",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "The unofficial Claude Code changelog, in your terminal",
   "author": {
     "name": "AnExiledDev",
