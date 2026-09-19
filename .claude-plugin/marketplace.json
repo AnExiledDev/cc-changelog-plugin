@@ -1,0 +1,24 @@
+{
+  "name": "cc-changelog",
+  "description": "The cc-changelog plugin, distributed from its own repository",
+  "owner": {
+    "name": "AnExiledDev",
+    "email": "696222+AnExiledDev@users.noreply.github.com",
+    "url": "https://github.com/AnExiledDev"
+  },
+  "plugins": [
+    {
+      "name": "cc-changelog",
+      "source": "./",
+      "description": "The unofficial Claude Code changelog, in your terminal: a pane over every release and ten tools over the site's JSON API",
+      "author": {
+        "name": "AnExiledDev",
+        "email": "696222+AnExiledDev@users.noreply.github.com"
+      },
+      "homepage": "https://changelogs.core-directive.com",
+      "repository": "https://github.com/AnExiledDev/cc-changelog-plugin",
+      "license": "MIT",
+      "keywords": ["changelog", "claude-code", "releases", "function-hooks", "reference"]
+    }
+  ]
+}

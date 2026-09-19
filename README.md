@@ -36,9 +36,17 @@ CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir ./cc-changelog-plugin
 ```
 
 `--plugin-dir` loads it for that session only and watches the folder, which is
-what you want while reading the code. To keep it, copy the folder into
-`~/.claude/skills/cc-changelog` instead and start `claude` with the same
-environment variable.
+what you want while reading the code. To keep it, install it through its own
+marketplace, which this repository carries in `.claude-plugin/marketplace.json`:
+
+```bash
+claude plugin marketplace add AnExiledDev/cc-changelog-plugin
+claude plugin install cc-changelog@cc-changelog
+```
+
+Upgrading later is `claude plugin marketplace update cc-changelog` followed by
+`claude plugin update cc-changelog@cc-changelog`. Start `claude` with the same
+environment variable either way.
 
 **The flag is not optional.** Without `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` the
 runtime this is built on does not exist, the module never loads, and the
