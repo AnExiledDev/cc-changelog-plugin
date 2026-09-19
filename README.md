@@ -6,7 +6,7 @@
 `/whatsnew` opens a pane in the terminal listing every release in
 `https://changelogs.core-directive.com/feed.json`, with a tab strip, a search
 field with three filters, a reader that draws one entry in full, and a line at
-the top saying how far behind the running build is. It also registers nine
+the top saying how far behind the running build is. It also registers ten
 tools the model can call, and polls for releases in the background so a
 session says something when one lands.
 
@@ -100,7 +100,7 @@ refused, including a tree that did not validate.
   seen raises `$.ui.toast` and sets `$.ui.status`, both without starting a
   turn. The first read only seeds: a session that starts three releases behind
   is not three toasts.
-- **Nine tools**, all registered from `session.start`, so they are listed by
+- **Ten tools**, all registered from `session.start`, so they are listed by
   turn one. Five are the changelog: `releases` says which versions exist and
   what shipped since a date; `entries` lists one release's entries and counts
   its sections, tiers and areas; `entry` reads one of them in full; `changelog`
@@ -120,6 +120,21 @@ refused, including a tree that did not validate.
   and one document through a single tool, picked by which arguments were given,
   because the argument a model has is a phrase and the ones the routes need are
   a corpus key and a path.
+- **A tenth, `modsapi`, over the surface this plugin is written against.**
+  The site mines the plugin runtime's declarations out of every release and
+  publishes them at `/reference/mods/api`: 19 nouns, 69 verbs, 71 events and
+  505 declarations at v2.1.278. Its whole-document route is half a megabyte,
+  which no tool answer may be, so the tool reads two cut routes instead: an
+  index of every symbol, searched by part of a name and narrowed by page, and
+  one symbol in full behind the `page` and `anchor` the index hands out. An
+  event answers with the declarations of its input and its result inlined,
+  because "what does `session.measure` arrive with" is the question the
+  index rows could not answer, and every answer names the other `types` it
+  mentions with their anchors, so `SessionUsage` is one call from
+  `SessionRateLimit`. Added 2026-09-19, when an agent asked the tools whether
+  a plugin could read rate-limit windows and per-response token usage and
+  none of the nine could say: `reference` names the `hook` family and
+  `docs` does not describe this API at all.
 - **Everything pages, and it pages the same way everywhere.** Each answer
   carries `offset`, `count`, `total` and `next_offset`; hand `next_offset` back
   as `offset` to continue, and a null one means there is nothing after this.
@@ -266,7 +281,7 @@ a hook tells its own pane from another plugin's. `$.http.fetch` answers
 ## The API it reads
 
 Every tool here is a thin pass-through of a public JSON route on
-`https://changelogs.core-directive.com`. Seventeen of them, one paging
+`https://changelogs.core-directive.com`. Nineteen of them, one paging
 contract (`offset`, `limit`, `count`, `total`, `next_offset`, where a null
 `next_offset` ends the walk), and one error convention: **422** names the
 parameter it refused and what it would have taken, **404** names what the site
@@ -284,6 +299,7 @@ them, and there is no key.
 | `/docs/sources.json`, `/docs/search.json`, `/docs/{source}/pages.json`, `/docs/{source}/{path}.json` | Anthropic's documentation as this site captured it, version by version |
 | `/blog.json`, `/blog/{slug}.json` | the site owner's own writing |
 | `/prompts/{version}/tools.json`, `/prompts/{version}/tools/{name}.json` | what a build actually told the model its tools do, byte for byte |
+| `/reference/mods/api/symbols.json`, `/reference/mods/api/{page}/{anchor}.json` | the plugin runtime's own API: every symbol on `$`, every event, every declared type; an event carries its input and result declarations inlined |
 
 The four that answer a whole document take `section`, `offset` and a character
 `limit`, and carry the document's outline on every answer, so reading one is a
