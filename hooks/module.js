@@ -170,6 +170,9 @@ const LEDGER_DAYS_LIMIT = 400;
 const DAY_LIMIT = 200;
 const CAPTURE_LIMIT = 200;
 const DIFF_LIMIT = 2000;
+const STORIES_LIMIT = 100;
+const STORY_STEPS_LIMIT = 200;
+const WATCH_LIMIT = 120;
 
 /**
  * Further than each of these documents runs, in characters, as the site's own
@@ -347,6 +350,14 @@ export const register = (on) => {
 
     on("tool.call", { tool: "mcp__cc-changelog__modsapi" }, async ($, e) => {
         return { result: asToolResult(await modsApiTool($, e)) };
+    });
+
+    on("tool.call", { tool: "mcp__cc-changelog__stories" }, async ($, e) => {
+        return { result: asToolResult(await storiesTool($, e)) };
+    });
+
+    on("tool.call", { tool: "mcp__cc-changelog__watch" }, async ($, e) => {
+        return { result: asToolResult(await watchTool($, e)) };
     });
 };
 
@@ -1689,6 +1700,71 @@ const promptsTool = async ($, e) => {
     );
 };
 
+/**
+ * A feature followed across every release that touched it.
+ *
+ * The one corpus here that is somebody's judgement rather than a document:
+ * a person decided that five entries across five releases were one thing
+ * arriving. A search can find the five; nothing but this says they belong
+ * together or what order they belong in.
+ *
+ * A slug the site does not publish is the route's own 404, deliberately, and
+ * a draft and a retirement answer the same way: which one it is would be a
+ * way to find out that an unpublished story is being worked on.
+ */
+const storiesTool = async ($, e) => {
+    const base = await baseUrl($);
+    const slug = text(e.slug);
+
+    if (slug === undefined) {
+        return fetched(
+            $,
+            `${base}/stories.json?${query({
+                limit: bounded(e.limit, 50, 1, STORIES_LIMIT),
+                offset: bounded(e.offset, 0, 0, MAX_OFFSET),
+            })}`,
+        );
+    }
+
+    if (SLUG.test(slug) !== true) {
+        return { error: `\`${slug}\` is not a story slug; they read like \`output-styles\`.` };
+    }
+
+    return fetched(
+        $,
+        `${base}/stories/${slug}.json?${query({
+            limit: bounded(e.limit, 100, 1, STORY_STEPS_LIMIT),
+            offset: bounded(e.offset, 0, 0, MAX_OFFSET),
+        })}`,
+    );
+};
+
+/**
+ * What has happened to already-published entries since their release shipped.
+ *
+ * Nothing here replaces anything, and that is the guarantee a caller has to
+ * carry rather than infer: an event is added and dated, so the entry it points
+ * at still says exactly what its release said. The tool's description says so
+ * in as many words for that reason.
+ *
+ * `kind` is passed through rather than checked against a copy of the six. The
+ * server's 422 names the vocabulary, which is strictly better than anything a
+ * second list here could say, and a second list is a second thing to forget.
+ */
+const watchTool = async ($, e) => {
+    const base = await baseUrl($);
+
+    return fetched(
+        $,
+        `${base}/watch.json?${query({
+            kind: text(e.kind),
+            since: text(e.since),
+            limit: bounded(e.limit, 50, 1, WATCH_LIMIT),
+            offset: bounded(e.offset, 0, 0, MAX_OFFSET),
+        })}`,
+    );
+};
+
 /** One fetch, the site's document or the site's own account of what was wrong. */
 const fetched = async ($, url) => {
     const response = await fetchJson($, url);
@@ -2097,6 +2173,57 @@ const TOOLS = [
                     description: "One symbol's `anchor`, as answered by a search. Needs `page` with it.",
                 },
                 limit: { type: "number", description: "At most this many symbols (1-100, default 25)." },
+                ...PAGING,
+            },
+        },
+    },
+    {
+        name: "stories",
+        description:
+            "Features followed across every release that touched them, as the site's owner " +
+            "grouped them by hand: how output styles, or hooks, or the plugin runtime actually " +
+            "arrived, in order, one release at a time. This is the one thing here that is not " +
+            "derivable from a single release, and it is somebody's judgement about which entries " +
+            "belong together rather than a search result. Given nothing it lists the published " +
+            "stories, longest span first, with each one's slug and how many releases it crosses; " +
+            "given a `slug` it answers that story's whole timeline, oldest release first, each " +
+            "step naming the version and the `anchor` the `entry` tool reads in full. A slug the " +
+            "site does not publish is an answer saying so.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                slug: { type: "string", description: "A story's `slug`, as answered by the list." },
+                limit: { type: "number", description: "At most this many stories or steps (default 50)." },
+                ...PAGING,
+            },
+        },
+    },
+    {
+        name: "watch",
+        description:
+            "What has happened to already-published entries since their release shipped: a flag " +
+            "reading moved on Anthropic's server, a gate was removed from the code, their " +
+            "documentation finally arrived, their official notes landed, or the site's owner " +
+            "corrected an entry by hand. A changelog entry is only as true as the day it was " +
+            "written, and this is the only way to find out which ones have aged. **Nothing here " +
+            "replaces anything**: an event is added and dated, never swapped in, so the entry it " +
+            "points at still says exactly what its release said and the event is the correction " +
+            "beside it. Narrow with `kind` and `since`; every answer carries `kinds` with the " +
+            "keys there are. An empty answer means nothing moved, not that something is wrong.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                kind: {
+                    type: "string",
+                    description:
+                        "One of `flag-changed`, `flag-graduated`, `documentation`, " +
+                        "`official-notes`, `deep-dive` or `hand-edit`. Every answer lists them as `kinds`.",
+                },
+                since: {
+                    type: "string",
+                    description: "An ISO date, as `2026-09-01`. Only events on or after that day.",
+                },
+                limit: { type: "number", description: "At most this many events (1-120, default 50)." },
                 ...PAGING,
             },
         },
