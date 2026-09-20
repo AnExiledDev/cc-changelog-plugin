@@ -119,6 +119,42 @@ const modsApiTool = async ($, e) => {
 };
 
 /**
+ * The Mods guide: ten hand-written pages on how to actually write a module.
+ *
+ * The other half of `modsapi`, and the half a model reaching for the runtime
+ * actually needs first. That tool answers what `SessionRateLimit` carries;
+ * this one answers why a hook would read it, which nothing Anthropic publishes
+ * says anywhere.
+ *
+ * Two routes, the same shape as `blog`: no page means the index, which carries
+ * every page's headings so a section can be named without fetching the page it
+ * is on. The prose is windowed by the site, in characters, and `section` is
+ * passed through untouched because the outline is the document's own
+ * vocabulary and nothing here knows it.
+ */
+const modsTool = async ($, e) => {
+    const base = await baseUrl($);
+    const page = text(e.page)?.toLowerCase();
+
+    if (page === undefined) {
+        return fetched($, `${base}/reference/mods.json`);
+    }
+
+    if (MODS_GUIDE_PAGES.includes(page) !== true) {
+        return { error: `There is no \`${page}\` page in the Mods guide.`, allowed: MODS_GUIDE_PAGES };
+    }
+
+    return fetched(
+        $,
+        `${base}/reference/mods/${page}.json?${query({
+            section: text(e.section),
+            offset: bounded(e.offset, 0, 0, MODS_GUIDE_MAX_OFFSET),
+            limit: bounded(e.limit, 8000, 1, TOOL_CHARS),
+        })}`,
+    );
+};
+
+/**
  * A reference name's slug, a blog post's slug and a documentation corpus key,
  * each matching the route that takes it. Checked here for the reason the
  * anchor is: a route that does not match answers the site's own HTML 404 and
@@ -153,6 +189,25 @@ const MODS_ANCHOR = /^[a-z][a-z0-9-]{0,199}$/;
 const MODS_PAGES = ["engine", "events", "types"];
 
 /**
+ * The ten pages of the Mods guide, which are a different closed list from the
+ * three above: those are the mined API's pages, these are the hand-written
+ * prose about it. Restated here rather than fetched so a guessed page is a
+ * sentence naming the ten, one turn before the site would say the same.
+ */
+const MODS_GUIDE_PAGES = [
+    "overview",
+    "anatomy",
+    "lifecycle",
+    "engine",
+    "events",
+    "ui",
+    "config",
+    "testing",
+    "gotchas",
+    "recipes",
+];
+
+/**
  * The site's own caps, restated so a bad argument is a smaller answer rather
  * than a 422 the model has to read and retry.
  */
@@ -181,6 +236,9 @@ const WATCH_LIMIT = 120;
  * of the way into a page.
  */
 const DOC_MAX_OFFSET = 500000;
+
+/** Further than any page of the Mods guide runs; the longest is 14,189. */
+const MODS_GUIDE_MAX_OFFSET = 100000;
 const PROSE_MAX_OFFSET = 200000;
 
 /**
@@ -350,6 +408,10 @@ export const register = (on) => {
 
     on("tool.call", { tool: "mcp__cc-changelog__modsapi" }, async ($, e) => {
         return { result: asToolResult(await modsApiTool($, e)) };
+    });
+
+    on("tool.call", { tool: "mcp__cc-changelog__mods" }, async ($, e) => {
+        return { result: asToolResult(await modsTool($, e)) };
     });
 
     on("tool.call", { tool: "mcp__cc-changelog__stories" }, async ($, e) => {
@@ -2152,7 +2214,9 @@ const TOOLS = [
             "symbol in full. An event answers with the declarations of what arrives and what may " +
             "be returned inlined under it; every answer names the other `types` it mentions, with " +
             "their anchors, so a shape is one call away. This is the surface the `reference` " +
-            "tool's `hook` family only names and the `docs` corpus does not describe at all.",
+            "tool's `hook` family only names and the `docs` corpus does not describe at all. " +
+            "For what any of it means rather than what it is called, use `mods`: this answers " +
+            "signatures, and that answers how a module is written.",
         inputSchema: {
             type: "object",
             properties: {
@@ -2173,6 +2237,43 @@ const TOOLS = [
                     description: "One symbol's `anchor`, as answered by a search. Needs `page` with it.",
                 },
                 limit: { type: "number", description: "At most this many symbols (1-100, default 25)." },
+                ...PAGING,
+            },
+        },
+    },
+    {
+        name: "mods",
+        description:
+            "How to actually write a Claude Code hooks module, as ten pages of hand-written " +
+            "guide: what a mod is and the gate that turns it on, the files one needs, the five " +
+            "tiers and what `next()` can do, the engine interface, the event catalogue, drawing " +
+            "in the terminal, `userConfig`, testing, confirmed gotchas reproduced against a real " +
+            "build, and worked recipes. Reach for this before writing any hooks code: nothing in " +
+            "Anthropic's published documentation describes this runtime, so a model working from " +
+            "the type declarations alone is guessing at how the pieces fit. Given nothing it lists " +
+            "the ten pages with each one's headings, which is enough to ask for a part by name; " +
+            "given a `page` it answers that page's markdown one window at a time, with `section` " +
+            "to read one heading and `next_offset` handed back as `offset` to read on. For a " +
+            "symbol's exact signature rather than the explanation around it, use `modsapi`.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                page: {
+                    type: "string",
+                    description:
+                        "One of `overview`, `anatomy`, `lifecycle`, `engine`, `events`, `ui`, " +
+                        "`config`, `testing`, `gotchas`, `recipes`. Omitted, it lists all ten.",
+                },
+                section: {
+                    type: "string",
+                    description:
+                        "A heading from that page's `sections`, to read one part rather than " +
+                        "the head of the page. Matched case-insensitively.",
+                },
+                limit: {
+                    type: "number",
+                    description: "At most this many characters of prose (default 8,000, max 20,000).",
+                },
                 ...PAGING,
             },
         },
