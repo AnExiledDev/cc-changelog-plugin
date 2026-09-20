@@ -58,8 +58,16 @@ const FALLBACK_TTL_MS = 15 * 60 * 1000;
  * spent on one call. This is the `limit` the `document.json` route is asked
  * for, so the cut happens on the server and the 200 KB never crosses the wire;
  * a model that wants more names a section or hands `next_offset` back.
+ *
+ * It was 20,000 until 2026-09-20, which made a bare `changelog` call 22,341
+ * characters, near enough six thousand tokens to read one release. The site's
+ * own `ToolPlan::PROSE_CHARS` moved to the same number on the same day and for
+ * the same measurement: past about twelve thousand the model is paying for
+ * text it will not read on this turn, and that is the whole reason the
+ * windowed routes exist. Too small costs one more call; too large is paid on
+ * every call that was already long enough.
  */
-const TOOL_CHARS = 20000;
+const TOOL_CHARS = 12000;
 
 /**
  * Further than any release's document goes, in characters.
@@ -1390,7 +1398,7 @@ const searchTool = async ($, e) => {
 const releasesTool = async ($, e) => {
     const base = await baseUrl($);
     const url = `${base}/releases.json?${query({
-        limit: bounded(e.limit, 20, 1, RELEASES_LIMIT),
+        limit: bounded(e.limit, 15, 1, RELEASES_LIMIT),
         offset: bounded(e.offset, 0, 0, MAX_OFFSET),
         since: text(e.since),
     })}`;
@@ -1440,13 +1448,13 @@ const upgradeTool = async ($, e) => {
         to,
         tier: text(e.tier),
         area: text(e.area),
-        limit: bounded(e.limit, 25, 1, ENTRIES_LIMIT),
+        limit: bounded(e.limit, 10, 1, ENTRIES_LIMIT),
         offset: bounded(e.offset, 0, 0, MAX_OFFSET),
     })}`;
 
     const response = await fetchJson($, url);
 
-    return response.ok === true ? response.json : problem(url, response);
+    return response.ok === true ? budgeted(url, response.json) : problem(url, response);
 };
 
 const entriesTool = async ($, e) => {
@@ -1458,7 +1466,7 @@ const entriesTool = async ($, e) => {
 
     const base = await baseUrl($);
     const url = `${base}/v/${asked.version}/entries.json?${query({
-        limit: bounded(e.limit, 25, 1, ENTRIES_LIMIT),
+        limit: bounded(e.limit, 15, 1, ENTRIES_LIMIT),
         offset: bounded(e.offset, 0, 0, MAX_OFFSET),
         section: text(e.section),
         tier: text(e.tier),
@@ -1521,7 +1529,7 @@ const referenceTool = async ($, e) => {
     }
 
     const paging = query({
-        limit: bounded(e.limit, 25, 1, REFERENCE_LIMIT),
+        limit: bounded(e.limit, 15, 1, REFERENCE_LIMIT),
         offset: bounded(e.offset, 0, 0, MAX_OFFSET),
     });
 
@@ -1590,7 +1598,7 @@ const docsTool = async ($, e) => {
     return fetched(
         $,
         `${base}/docs/${source}/pages.json?${query({
-            limit: bounded(e.limit, 50, 1, DOCS_PAGES_LIMIT),
+            limit: bounded(e.limit, 25, 1, DOCS_PAGES_LIMIT),
             offset: bounded(e.offset, 0, 0, MAX_OFFSET),
         })}`,
     );
@@ -1618,7 +1626,7 @@ const docsChangesTool = async ($, e) => {
         return fetched(
             $,
             `${base}/docs/change/${change}.json?${query({
-                limit: bounded(e.limit, 400, 1, DIFF_LIMIT),
+                limit: bounded(e.limit, 12, 1, DIFF_LIMIT),
                 offset: bounded(e.offset, 0, 0, DIFF_MAX_OFFSET),
             })}`,
         );
@@ -1634,7 +1642,7 @@ const docsChangesTool = async ($, e) => {
         return fetched(
             $,
             `${base}/docs/c/${capture}.json?${query({
-                limit: bounded(e.limit, 50, 1, CAPTURE_LIMIT),
+                limit: bounded(e.limit, 12, 1, CAPTURE_LIMIT),
                 offset: bounded(e.offset, 0, 0, MAX_OFFSET),
             })}`,
         );
@@ -1650,7 +1658,7 @@ const docsChangesTool = async ($, e) => {
         return fetched(
             $,
             `${base}/docs/day/${date}.json?${query({
-                limit: bounded(e.limit, 50, 1, DAY_LIMIT),
+                limit: bounded(e.limit, 12, 1, DAY_LIMIT),
                 offset: bounded(e.offset, 0, 0, MAX_OFFSET),
             })}`,
         );
@@ -1660,7 +1668,7 @@ const docsChangesTool = async ($, e) => {
         return fetched(
             $,
             `${base}/docs/days.json?${query({
-                limit: bounded(e.limit, 60, 1, LEDGER_DAYS_LIMIT),
+                limit: bounded(e.limit, 12, 1, LEDGER_DAYS_LIMIT),
                 offset: bounded(e.offset, 0, 0, MAX_OFFSET),
             })}`,
         );
@@ -1677,7 +1685,7 @@ const docsChangesTool = async ($, e) => {
         `${base}/docs/changes.json?${query({
             source,
             since: text(e.since),
-            limit: bounded(e.limit, 25, 1, CHANGES_LIMIT),
+            limit: bounded(e.limit, 12, 1, CHANGES_LIMIT),
             offset: bounded(e.offset, 0, 0, MAX_OFFSET),
         })}`,
     );
@@ -1742,7 +1750,7 @@ const promptsTool = async ($, e) => {
         return fetched(
             $,
             `${base}/prompts/${asked.version}/tools.json?${query({
-                limit: bounded(e.limit, 50, 1, PROMPT_TOOLS_LIMIT),
+                limit: bounded(e.limit, 25, 1, PROMPT_TOOLS_LIMIT),
                 offset: bounded(e.offset, 0, 0, MAX_OFFSET),
             })}`,
         );
@@ -1782,7 +1790,7 @@ const storiesTool = async ($, e) => {
         return fetched(
             $,
             `${base}/stories.json?${query({
-                limit: bounded(e.limit, 50, 1, STORIES_LIMIT),
+                limit: bounded(e.limit, 25, 1, STORIES_LIMIT),
                 offset: bounded(e.offset, 0, 0, MAX_OFFSET),
             })}`,
         );
@@ -1795,7 +1803,7 @@ const storiesTool = async ($, e) => {
     return fetched(
         $,
         `${base}/stories/${slug}.json?${query({
-            limit: bounded(e.limit, 100, 1, STORY_STEPS_LIMIT),
+            limit: bounded(e.limit, 25, 1, STORY_STEPS_LIMIT),
             offset: bounded(e.offset, 0, 0, MAX_OFFSET),
         })}`,
     );
@@ -1821,10 +1829,94 @@ const watchTool = async ($, e) => {
         `${base}/watch.json?${query({
             kind: text(e.kind),
             since: text(e.since),
-            limit: bounded(e.limit, 50, 1, WATCH_LIMIT),
+            limit: bounded(e.limit, 12, 1, WATCH_LIMIT),
             offset: bounded(e.offset, 0, 0, MAX_OFFSET),
         })}`,
     );
+};
+
+/**
+ * The answer with the parts a model will not read taken out, and a note saying so.
+ *
+ * `upgrade` only, and the site's `App\Mcp\Budget` drops exactly these keys for
+ * exactly this reason: it is the one tool whose payload aggregates across every
+ * release in a span, so its cost grows with how far behind the caller is, and a
+ * reader four hundred releases back is precisely who asks it. `facets` is the
+ * tier and area counts over the whole span, which the pane draws a filter from
+ * and a model never will; `releases[].summary` is a paragraph per crossed
+ * release, up to a hundred of them, covering the same ground the span's own
+ * `entries` cover at the detail the question was asked at. Measured against the
+ * live site 2026-09-20: a span from 2.1.200, seventy-eight releases wide, is
+ * 53,563 characters and 15,076 once these are gone, a seventy-two per cent cut
+ * for nothing the asker was reading. The same drop on the site's own `/mcp`
+ * answer took it from 104,293 characters to 20,080.
+ *
+ * Subtractive only: it removes keys and never computes one, so nothing it
+ * returns can disagree with the route that built it. Every drop is announced,
+ * with `source_url` beside it, because a model that cannot see what it was not
+ * given cannot decide to go and get it, and a quiet trim is indistinguishable
+ * from a site that does not hold the data.
+ *
+ * This is a second copy of a rule the site also holds, and deliberately so:
+ * these tools fetch the JSON routes directly rather than through `/mcp`, so
+ * nothing on the server side is in the path to apply it. The site's
+ * `McpEndpointTest` reads this literal and fails when the two lists drift.
+ */
+const UPGRADE_DROP = ["facets"];
+const UPGRADE_DROP_FROM_RELEASES = ["summary", "entries_url"];
+
+const budgeted = (url, answer) => {
+    if (answer === null || typeof answer !== "object" || Array.isArray(answer)) {
+        return answer;
+    }
+
+    const trimmed = { ...answer };
+    const dropped = [];
+
+    for (const key of UPGRADE_DROP) {
+        if (key in trimmed) {
+            delete trimmed[key];
+            dropped.push(key);
+        }
+    }
+
+    if (Array.isArray(trimmed.releases)) {
+        const seen = new Set();
+
+        trimmed.releases = trimmed.releases.map((row) => {
+            if (row === null || typeof row !== "object" || Array.isArray(row)) {
+                return row;
+            }
+
+            const kept = { ...row };
+
+            for (const key of UPGRADE_DROP_FROM_RELEASES) {
+                if (key in kept) {
+                    delete kept[key];
+                    seen.add(key);
+                }
+            }
+
+            return kept;
+        });
+
+        for (const key of seen) {
+            dropped.push(`releases[].${key}`);
+        }
+    }
+
+    if (dropped.length === 0) {
+        return trimmed;
+    }
+
+    return {
+        ...trimmed,
+        source_url: url,
+        omitted: {
+            keys: dropped,
+            why: "Dropped to keep this answer small enough to read. `source_url` carries them in full.",
+        },
+    };
 };
 
 /** One fetch, the site's document or the site's own account of what was wrong. */
@@ -1842,9 +1934,11 @@ const fetched = async ($, url) => {
 const PAGING = {
     offset: {
         type: "number",
-        description:
-            "Start here rather than at the first result. Hand back the `next_offset` of the " +
-            "previous answer to continue; `next_offset: null` means there is nothing after this.",
+        // Short on purpose: this rides on fourteen tools, so every word here
+        // is spent fourteen times in the declarations the model is handed
+        // before it has asked anything. Shortening it from 162 characters to
+        // 78 took 1,176 out of the listing, counted 2026-09-20.
+        description: "Hand back the previous answer's `next_offset` to continue; null means the end.",
     },
 };
 
@@ -1941,7 +2035,7 @@ const TOOLS = [
         inputSchema: {
             type: "object",
             properties: {
-                limit: { type: "number", description: "At most this many releases (1-100, default 20)." },
+                limit: { type: "number", description: "At most this many releases (1-100, default 15)." },
                 since: {
                     type: "string",
                     description: "Only releases published on or after this date, as `2026-09-01`.",
@@ -1980,7 +2074,7 @@ const TOOLS = [
                     description: "Only entries of this tier: `use`, `notice`, `soon` or `internal`.",
                 },
                 area: { type: "string", description: "Only entries in this area, as `hooks` or `cli`." },
-                limit: { type: "number", description: "At most this many entries (1-200, default 25)." },
+                limit: { type: "number", description: "At most this many entries (1-200, default 10)." },
                 ...PAGING,
             },
         },
@@ -2007,7 +2101,7 @@ const TOOLS = [
                     description: "Only entries of this tier: `use`, `notice`, `soon` or `internal`.",
                 },
                 area: { type: "string", description: "Only entries in this area, as `hooks` or `cli`." },
-                limit: { type: "number", description: "At most this many entries (1-200, default 25)." },
+                limit: { type: "number", description: "At most this many entries (1-200, default 15)." },
                 ...PAGING,
             },
         },
@@ -2065,7 +2159,7 @@ const TOOLS = [
                     type: "string",
                     description: "One name's `slug`, as answered by a search. Needs `family` with it.",
                 },
-                limit: { type: "number", description: "At most this many names (1-100, default 25)." },
+                limit: { type: "number", description: "At most this many names (1-100, default 15)." },
                 ...PAGING,
             },
         },
@@ -2097,7 +2191,7 @@ const TOOLS = [
                     type: "string",
                     description: "A heading from the page's `sections`, to read that part rather than the head.",
                 },
-                limit: { type: "number", description: "At most this many hits or pages (default 10 / 50)." },
+                limit: { type: "number", description: "At most this many hits or pages (default 10 / 25)." },
                 ...PAGING,
             },
         },
@@ -2152,7 +2246,7 @@ const TOOLS = [
                         "One capture's id, as `claude-code-20260914T033000Z`, carried by every " +
                         "row as `capture`. Answers that one read of the corpus and what it moved.",
                 },
-                limit: { type: "number", description: "At most this many rows or diff lines (default 25)." },
+                limit: { type: "number", description: "At most this many rows or diff lines (default 12)." },
                 ...PAGING,
             },
         },
@@ -2197,7 +2291,7 @@ const TOOLS = [
                     description: "A stock tool's `name`, as `Read` or `WebFetch`, from the list.",
                 },
                 section: { type: "string", description: "A heading from the description's `sections`." },
-                limit: { type: "number", description: "At most this many tools (1-100, default 50)." },
+                limit: { type: "number", description: "At most this many tools (1-100, default 25)." },
                 ...PAGING,
             },
         },
@@ -2272,7 +2366,7 @@ const TOOLS = [
                 },
                 limit: {
                     type: "number",
-                    description: "At most this many characters of prose (default 8,000, max 20,000).",
+                    description: "At most this many characters of prose (default 8,000, max 12,000).",
                 },
                 ...PAGING,
             },
@@ -2294,7 +2388,7 @@ const TOOLS = [
             type: "object",
             properties: {
                 slug: { type: "string", description: "A story's `slug`, as answered by the list." },
-                limit: { type: "number", description: "At most this many stories or steps (default 50)." },
+                limit: { type: "number", description: "At most this many stories or steps (default 25)." },
                 ...PAGING,
             },
         },
@@ -2324,7 +2418,7 @@ const TOOLS = [
                     type: "string",
                     description: "An ISO date, as `2026-09-01`. Only events on or after that day.",
                 },
-                limit: { type: "number", description: "At most this many events (1-120, default 50)." },
+                limit: { type: "number", description: "At most this many events (1-120, default 12)." },
                 ...PAGING,
             },
         },
