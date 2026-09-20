@@ -6,7 +6,7 @@
 `/whatsnew` opens a pane in the terminal listing every release in
 `https://changelogs.core-directive.com/feed.json`, with a tab strip, a search
 field with three filters, a reader that draws one entry in full, and a line at
-the top saying how far behind the running build is. It also registers fourteen
+the top saying how far behind the running build is. It also registers fifteen
 tools the model can call, and polls for releases in the background so a
 session says something when one lands.
 
@@ -166,6 +166,18 @@ refused, including a tree that did not validate.
   a plugin could read rate-limit windows and per-response token usage and
   none of the nine could say: `reference` names the `hook` family and
   `docs` does not describe this API at all.
+- **`mods`, the other half of `modsapi`: how to actually write one.** Added
+  2026-09-20. `modsapi` answers what a symbol is called and what it takes;
+  the site's Mods guide is ten hand-written pages on what any of it means, and
+  it is the only written explanation of this runtime anywhere. A model handed
+  the declarations alone can name every noun on `$` and still not know that a
+  module is loaded once per session, that a hook wraps the tiers below it, or
+  which of the confirmed gotchas cost a run to find. Two routes behind one
+  tool: no `page` lists the ten with every page's headings, so a part can be
+  named without fetching the page it is on, and a `page` answers that page's
+  markdown one window at a time. The prose is markdown in the site's
+  repository and is served as written, so what a reader sees on the guide and
+  what this tool returns are the same file.
 - **Two more, `stories` and `watch`, over the two things on that site a
   machine could not have worked out.** Added 2026-09-20. Everything above is a
   cut of something the pipeline produced; these two are a person's own reading
@@ -330,7 +342,7 @@ a hook tells its own pane from another plugin's. `$.http.fetch` answers
 ## The API it reads
 
 Every tool here is a thin pass-through of a public JSON route on
-`https://changelogs.core-directive.com`. Nineteen of them, one paging
+`https://changelogs.core-directive.com`. Thirty of them, one paging
 contract (`offset`, `limit`, `count`, `total`, `next_offset`, where a null
 `next_offset` ends the walk), and one error convention: **422** names the
 parameter it refused and what it would have taken, **404** names what the site
@@ -350,11 +362,12 @@ them, and there is no key.
 | `/blog.json`, `/blog/{slug}.json` | the site owner's own writing |
 | `/prompts/{version}/tools.json`, `/prompts/{version}/tools/{name}.json` | what a build actually told the model its tools do, byte for byte |
 | `/reference/mods/api/symbols.json`, `/reference/mods/api/{page}/{anchor}.json` | the plugin runtime's own API: every symbol on `$`, every event, every declared type; an event carries its input and result declarations inlined |
+| `/reference/mods.json`, `/reference/mods/{page}.json` | the Mods guide: ten hand-written pages on how a hooks module is actually written, as the markdown the site's own pages render |
 | `/docs/changes.json`, `/docs/days.json`, `/docs/day/{date}.json`, `/docs/change/{id}.json`, `/docs/c/{capture}.json` | what Anthropic quietly edited: which pages moved, on what day, and what the words used to be |
 | `/stories.json`, `/stories/{slug}.json` | one feature followed across every release it was touched in, as somebody grouped it by hand |
 | `/watch.json` | what has happened to published entries since: flags moving, notes landing, documentation catching up, corrections |
 
-The four that answer a whole document take `section`, `offset` and a character
+The five that answer a whole document take `section`, `offset` and a character
 `limit`, and carry the document's outline on every answer, so reading one is a
 walk rather than a download.
 
