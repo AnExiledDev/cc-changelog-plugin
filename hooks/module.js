@@ -1626,7 +1626,7 @@ const docsChangesTool = async ($, e) => {
         return fetched(
             $,
             `${base}/docs/change/${change}.json?${query({
-                limit: bounded(e.limit, 12, 1, DIFF_LIMIT),
+                limit: bounded(e.limit, 25, 1, DIFF_LIMIT),
                 offset: bounded(e.offset, 0, 0, DIFF_MAX_OFFSET),
             })}`,
         );
@@ -2246,7 +2246,7 @@ const TOOLS = [
                         "One capture's id, as `claude-code-20260914T033000Z`, carried by every " +
                         "row as `capture`. Answers that one read of the corpus and what it moved.",
                 },
-                limit: { type: "number", description: "At most this many rows or diff lines (default 12)." },
+                limit: { type: "number", description: "At most this many rows (default 12), or diff lines for `change` (default 25)." },
                 ...PAGING,
             },
         },
