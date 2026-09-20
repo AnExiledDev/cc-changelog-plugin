@@ -237,7 +237,7 @@ const WATCH_LIMIT = 120;
  */
 const DOC_MAX_OFFSET = 500000;
 
-/** Further than any page of the Mods guide runs; the longest is 14,189. */
+/** Further than any page of the Mods guide runs; the longest is 14,179. */
 const MODS_GUIDE_MAX_OFFSET = 100000;
 const PROSE_MAX_OFFSET = 200000;
 
