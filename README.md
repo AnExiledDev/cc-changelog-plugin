@@ -6,7 +6,7 @@
 `/whatsnew` opens a pane in the terminal listing every release in
 `https://changelogs.core-directive.com/feed.json`, with a tab strip, a search
 field with three filters, a reader that draws one entry in full, and a line at
-the top saying how far behind the running build is. It also registers ten
+the top saying how far behind the running build is. It also registers eleven
 tools the model can call, and polls for releases in the background so a
 session says something when one lands.
 
@@ -108,15 +108,27 @@ refused, including a tree that did not validate.
   seen raises `$.ui.toast` and sets `$.ui.status`, both without starting a
   turn. The first read only seeds: a session that starts three releases behind
   is not three toasts.
-- **Ten tools**, all registered from `session.start`, so they are listed by
-  turn one. Five are the changelog: `releases` says which versions exist and
-  what shipped since a date; `entries` lists one release's entries and counts
+- **Eleven tools**, all registered from `session.start`, so they are listed by
+  turn one. Six are the changelog: `releases` says which versions exist and
+  what shipped since a date; `upgrade` answers everything published between two
+  versions at once; `entries` lists one release's entries and counts
   its sections, tiers and areas; `entry` reads one of them in full; `changelog`
   reads a release as a document, a window at a time; and `search` crosses every
   release at once. They were two until 2026-09-10, and the three that were
   missing are the three questions the two could not answer: what versions
   exist, what one release holds, and what one entry actually says past its
   one-line summary.
+- **`upgrade` is the one that answers "what changed for me"**, added 2026-09-20.
+  Before it, a caller who had upgraded from `2.1.270` to `2.1.278` had to page
+  `/releases.json` by a date it was expected to already know, fetch every
+  release's entries in turn, and flatten them itself: four to ten round trips
+  for the commonest question anybody asks a changelog, and an agent driving it
+  usually gave up partway. One call now answers the flattened span, the
+  releases it crossed, and `facets` counting the entries by tier and area. The
+  span is half-open, `(from, to]`: the reader has been running `from` for a
+  week and does not need it back. `from` is optional here and required on the
+  site's own route, because nothing on `$` says which Claude Code is running
+  but the binary does, and this module already asks it.
 - **Four more, one per corpus**, added the same day, because a changelog says
   what changed and nothing here could say what a thing *is*. `reference` is the
   mined inventory of every environment variable, flag, settings key, slash
@@ -152,8 +164,9 @@ refused, including a tree that did not validate.
   is a pass-through of `/v/{version}/document.json`, which takes `section`,
   `offset` and a character `limit` and answers one window plus the document's
   outline, so nothing here ever holds a release it is not going to use.
-- **`search` and `entries` narrow** on `version`, `tier` (`use`, `notice`,
-  `soon`, `internal`) and `area`, and `entries` also on `section`.
+- **`search`, `upgrade` and `entries` narrow** on `tier` (`use`, `notice`,
+  `soon`, `internal`) and `area`; `search` and `entries` also on `version`, and
+  `entries` on `section`.
 - **The four corpus tools window server-side too**, through the same routes and
   the same `section` / `offset` / `sections` contract: a documentation page, a
   blog post and a stock tool description are all cut by the site before they
@@ -299,6 +312,7 @@ them, and there is no key.
 | Route | Answers |
 | --- | --- |
 | `/releases.json` | releases, newest first |
+| `/upgrade.json` | everything published between two versions, flattened, with the releases crossed and facets |
 | `/v/{version}/entries.json` | one release's entries, with facets and the summary |
 | `/v/{version}/e/{anchor}.json` | one entry in full |
 | `/v/{version}/document.json` | one character window of a release, with its outline |

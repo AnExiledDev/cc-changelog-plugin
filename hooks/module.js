@@ -292,6 +292,10 @@ export const register = (on) => {
         return { result: asToolResult(await releasesTool($, e)) };
     });
 
+    on("tool.call", { tool: "mcp__cc-changelog__upgrade" }, async ($, e) => {
+        return { result: asToolResult(await upgradeTool($, e)) };
+    });
+
     on("tool.call", { tool: "mcp__cc-changelog__entries" }, async ($, e) => {
         return { result: asToolResult(await entriesTool($, e)) };
     });
@@ -1298,6 +1302,55 @@ const releasesTool = async ($, e) => {
     return response.ok === true ? response.json : problem(url, response);
 };
 
+/**
+ * Everything published between the build a reader was on and the one they are
+ * on now, in one call.
+ *
+ * The one tool here that can answer without being told where the reader is
+ * standing. The site's own `/upgrade.json` requires `from`, because a server
+ * has no build to ask about; this module already asks the binary for the
+ * toast that counts how far behind a session is, so an omitted `from` is
+ * filled in with the running version rather than refused. That is the whole
+ * reason the argument is optional on this side and required on the endpoint's.
+ *
+ * `to` is passed through rather than resolved: an absent `to` already means
+ * the newest release on the route, so `latest` is dropped rather than turned
+ * into a version, which keeps the URL cacheable for the reason `releaseAsked`
+ * resolves `latest` everywhere else.
+ */
+const upgradeTool = async ($, e) => {
+    const from = text(e.from) ?? (await installed($));
+
+    if (from === undefined) {
+        return { error: "An upgrade needs a `from` version: `claude --version` could not be read here." };
+    }
+
+    if (!VERSION.test(from)) {
+        return { error: `\`${from}\` is not a release, which reads like \`2.1.267\`.` };
+    }
+
+    const asked = text(e.to);
+    const to = asked === undefined || asked.toLowerCase() === "latest" ? undefined : asked;
+
+    if (to !== undefined && !VERSION.test(to)) {
+        return { error: `\`${to}\` is not a release, which reads like \`2.1.267\`.` };
+    }
+
+    const base = await baseUrl($);
+    const url = `${base}/upgrade.json?${query({
+        from,
+        to,
+        tier: text(e.tier),
+        area: text(e.area),
+        limit: bounded(e.limit, 25, 1, ENTRIES_LIMIT),
+        offset: bounded(e.offset, 0, 0, MAX_OFFSET),
+    })}`;
+
+    const response = await fetchJson($, url);
+
+    return response.ok === true ? response.json : problem(url, response);
+};
+
 const entriesTool = async ($, e) => {
     const asked = await releaseAsked($, e.version);
 
@@ -1550,12 +1603,13 @@ const PAGING = {
  * usually needs them. The hooks that answer the calls are in `register`, one
  * per tool; only the declarations are gathered here.
  *
- * The first five are one tool split five ways rather than five separate ideas:
- * `releases` says what exists, `entries` says what one release holds, `entry`
- * reads one finding in full, `changelog` reads the release as a document, and
- * `search` crosses every release at once. Each description names the next one,
- * because a model that has just been handed a truncated list is exactly the
- * reader who needs to know which tool is not truncated.
+ * The first six are one tool split six ways rather than six separate ideas:
+ * `releases` says what exists, `upgrade` says what crossing from one version
+ * to another means, `entries` says what one release holds, `entry` reads one
+ * finding in full, `changelog` reads the release as a document, and `search`
+ * crosses every release at once. Each description names the next one, because
+ * a model that has just been handed a truncated list is exactly the reader who
+ * needs to know which tool is not truncated.
  *
  * The last four are one corpus each, and they answer a different question:
  * `reference` is what a name is, `docs` is what Anthropic published, `blog` is
@@ -1636,6 +1690,41 @@ const TOOLS = [
                     type: "string",
                     description: "Only releases published on or after this date, as `2026-09-01`.",
                 },
+                ...PAGING,
+            },
+        },
+    },
+    {
+        name: "upgrade",
+        description:
+            "What changed between two versions, in one call. Reach for this whenever somebody names " +
+            "two versions, says they upgraded, or asks what is new since the build they are on: it " +
+            "answers every entry published after `from` up to and including `to`, flattened across " +
+            "the releases in between, with `facets` counting them by tier and area and " +
+            "`releases_crossed` saying how many versions that was. `from` omitted is the Claude Code " +
+            "that is running here; `to` omitted is the newest release. Narrow with `tier` (start " +
+            "with `use`, the things that ask something of the reader) or `area`. This is the tool " +
+            'for "what changed for me"; `releases` is for "what exists". An empty `entries` is a ' +
+            "real answer: nothing shipped in that span.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                from: {
+                    type: "string",
+                    description:
+                        "The version being left behind, as `2.1.270`. Its own entries are not " +
+                        "included; the reader has been running it. Omitted, the running build.",
+                },
+                to: {
+                    type: "string",
+                    description: "The version arrived on, as `2.1.278`. Omitted or `latest`, the newest release.",
+                },
+                tier: {
+                    type: "string",
+                    description: "Only entries of this tier: `use`, `notice`, `soon` or `internal`.",
+                },
+                area: { type: "string", description: "Only entries in this area, as `hooks` or `cli`." },
+                limit: { type: "number", description: "At most this many entries (1-200, default 25)." },
                 ...PAGING,
             },
         },
