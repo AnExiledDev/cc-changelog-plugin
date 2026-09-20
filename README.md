@@ -6,7 +6,7 @@
 `/whatsnew` opens a pane in the terminal listing every release in
 `https://changelogs.core-directive.com/feed.json`, with a tab strip, a search
 field with three filters, a reader that draws one entry in full, and a line at
-the top saying how far behind the running build is. It also registers eleven
+the top saying how far behind the running build is. It also registers twelve
 tools the model can call, and polls for releases in the background so a
 session says something when one lands.
 
@@ -108,7 +108,7 @@ refused, including a tree that did not validate.
   seen raises `$.ui.toast` and sets `$.ui.status`, both without starting a
   turn. The first read only seeds: a session that starts three releases behind
   is not three toasts.
-- **Eleven tools**, all registered from `session.start`, so they are listed by
+- **Twelve tools**, all registered from `session.start`, so they are listed by
   turn one. Six are the changelog: `releases` says which versions exist and
   what shipped since a date; `upgrade` answers everything published between two
   versions at once; `entries` lists one release's entries and counts
@@ -140,7 +140,18 @@ refused, including a tree that did not validate.
   and one document through a single tool, picked by which arguments were given,
   because the argument a model has is a phrase and the ones the routes need are
   a corpus key and a path.
-- **A tenth, `modsapi`, over the surface this plugin is written against.**
+- **`docschanges`, what Anthropic quietly edited**, added 2026-09-20. The site
+  re-reads that documentation on a timer and diffs each read against the last,
+  so it holds a history nothing upstream publishes: which pages moved, on what
+  day, and what the words used to be. Five routes behind one tool, picked by
+  the arguments given — the recent changes across every corpus, one day of
+  them, the per-day totals so a caller can see which days were busy before
+  reading any, one edit with its diff as lines, and one capture with everything
+  that read moved. It is split from `docs` for the reason `upgrade` is split
+  from `releases`: one answers what is true now and the other answers what
+  moved, and a model handed only the first will summarise a page and call it
+  news.
+- **An eleventh, `modsapi`, over the surface this plugin is written against.**
   The site mines the plugin runtime's declarations out of every release and
   publishes them at `/reference/mods/api`: 19 nouns, 69 verbs, 71 events and
   505 declarations at v2.1.278. Its whole-document route is half a megabyte,

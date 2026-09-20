@@ -134,6 +134,16 @@ const DOC_PATH = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
 const PROMPT_TOOL = /^[A-Za-z][A-Za-z0-9_]{0,79}$/;
 
 /**
+ * A day of the documentation-change ledger, and one capture of a corpus.
+ *
+ * A capture id is the corpus key and the instant it was read joined by a
+ * hyphen, which is how the site's own route spells one; checked here so a
+ * mistyped id is a sentence rather than the site's HTML 404.
+ */
+const LEDGER_DATE = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/;
+const CAPTURE_ID = /^[a-z0-9][a-z0-9-]*-[0-9]{8}T[0-9]{6}Z$/;
+
+/**
  * A Mods API symbol's anchor and the three pages one can sit on, matching
  * the site's route constraints. An anchor is the HTML page's own fragment
  * (`t-sessionratelimit`, `e-session-measure`, `v-session-usage`), which is
@@ -155,6 +165,11 @@ const DOCS_PAGES_LIMIT = 200;
 const DOCS_HITS_LIMIT = 50;
 const BLOG_LIMIT = 100;
 const PROMPT_TOOLS_LIMIT = 100;
+const CHANGES_LIMIT = 100;
+const LEDGER_DAYS_LIMIT = 400;
+const DAY_LIMIT = 200;
+const CAPTURE_LIMIT = 200;
+const DIFF_LIMIT = 2000;
 
 /**
  * Further than each of these documents runs, in characters, as the site's own
@@ -164,6 +179,12 @@ const PROMPT_TOOLS_LIMIT = 100;
  */
 const DOC_MAX_OFFSET = 500000;
 const PROSE_MAX_OFFSET = 200000;
+
+/**
+ * Further than one change's diff runs, in lines. A diff is paged rather than
+ * truncated, so the guard is line-shaped and larger than the row-shaped one.
+ */
+const DIFF_MAX_OFFSET = 50000;
 
 /**
  * Further than any of these lists goes. It exists so a model that mistakes a
@@ -229,8 +250,8 @@ export const register = (on) => {
         });
 
         // One table, read twice: here to declare the tools and below to hook
-        // the calls. Ten names drifting apart in two places is the bug this
-        // shape cannot have.
+        // the calls. A dozen names drifting apart in two places is the bug
+        // this shape cannot have.
         for (const tool of TOOLS) {
             await $.tool.register({
                 name: tool.name,
@@ -310,6 +331,10 @@ export const register = (on) => {
 
     on("tool.call", { tool: "mcp__cc-changelog__docs" }, async ($, e) => {
         return { result: asToolResult(await docsTool($, e)) };
+    });
+
+    on("tool.call", { tool: "mcp__cc-changelog__docschanges" }, async ($, e) => {
+        return { result: asToolResult(await docsChangesTool($, e)) };
     });
 
     on("tool.call", { tool: "mcp__cc-changelog__blog" }, async ($, e) => {
@@ -1499,6 +1524,93 @@ const docsTool = async ($, e) => {
 };
 
 /**
+ * What Anthropic changed in that documentation, rather than what it says.
+ *
+ * Five routes behind one tool, for the reason `docs` is three: the argument a
+ * caller has is "did the hooks page move last week", and the arguments the
+ * routes need are a corpus key, a date, a change id or a capture id. The
+ * precedence below is the site's own, narrowest first, so a call carrying both
+ * `change` and `source` reads the change rather than quietly ignoring the id
+ * it was given.
+ *
+ * Each branch bounds `limit` against the cap of the route it reaches, because
+ * the ledger's caps are not one number: a day of changes and a diff's lines
+ * are counted in the same argument and are not the same size of thing.
+ */
+const docsChangesTool = async ($, e) => {
+    const base = await baseUrl($);
+    const change = whole(e.change);
+
+    if (change !== undefined) {
+        return fetched(
+            $,
+            `${base}/docs/change/${change}.json?${query({
+                limit: bounded(e.limit, 400, 1, DIFF_LIMIT),
+                offset: bounded(e.offset, 0, 0, DIFF_MAX_OFFSET),
+            })}`,
+        );
+    }
+
+    const capture = text(e.capture);
+
+    if (capture !== undefined) {
+        if (CAPTURE_ID.test(capture) !== true) {
+            return { error: `\`${capture}\` is not a capture id; they read like \`claude-code-20260914T033000Z\`.` };
+        }
+
+        return fetched(
+            $,
+            `${base}/docs/c/${capture}.json?${query({
+                limit: bounded(e.limit, 50, 1, CAPTURE_LIMIT),
+                offset: bounded(e.offset, 0, 0, MAX_OFFSET),
+            })}`,
+        );
+    }
+
+    const date = text(e.date);
+
+    if (date !== undefined) {
+        if (LEDGER_DATE.test(date) !== true) {
+            return { error: `\`${date}\` is not a date; they read like \`2026-09-14\`.` };
+        }
+
+        return fetched(
+            $,
+            `${base}/docs/day/${date}.json?${query({
+                limit: bounded(e.limit, 50, 1, DAY_LIMIT),
+                offset: bounded(e.offset, 0, 0, MAX_OFFSET),
+            })}`,
+        );
+    }
+
+    if (e.days === true) {
+        return fetched(
+            $,
+            `${base}/docs/days.json?${query({
+                limit: bounded(e.limit, 60, 1, LEDGER_DAYS_LIMIT),
+                offset: bounded(e.offset, 0, 0, MAX_OFFSET),
+            })}`,
+        );
+    }
+
+    const source = text(e.source);
+
+    if (source !== undefined && SOURCE.test(source) !== true) {
+        return { error: `\`${source}\` is not a corpus key; they read like \`claude-code\`.` };
+    }
+
+    return fetched(
+        $,
+        `${base}/docs/changes.json?${query({
+            source,
+            since: text(e.since),
+            limit: bounded(e.limit, 25, 1, CHANGES_LIMIT),
+            offset: bounded(e.offset, 0, 0, MAX_OFFSET),
+        })}`,
+    );
+};
+
+/**
  * The site owner's own writing about all of this.
  *
  * The one corpus here that is neither mined nor captured: a changelog entry
@@ -1611,12 +1723,18 @@ const PAGING = {
  * a model that has just been handed a truncated list is exactly the reader who
  * needs to know which tool is not truncated.
  *
- * The last four are one corpus each, and they answer a different question:
- * `reference` is what a name is, `docs` is what Anthropic published, `blog` is
- * what this site's owner argued, and `prompts` is what the model was actually
- * told. Every one of them takes the index, the search and the document through
- * one tool, because the argument a caller has is a phrase and the arguments
- * the routes need are a key and a path.
+ * The last five are one corpus each, and they answer a different question:
+ * `reference` is what a name is, `docs` is what Anthropic published,
+ * `docschanges` is what Anthropic quietly edited, `blog` is what this site's
+ * owner argued, and `prompts` is what the model was actually told. Every one
+ * of them takes the index, the search and the document through one tool,
+ * because the argument a caller has is a phrase and the arguments the routes
+ * need are a key and a path.
+ *
+ * `docs` and `docschanges` are the pair most easily confused, and they are
+ * split for the reason `releases` and `upgrade` are: one answers what is true
+ * now and the other answers what moved, and a model handed only the first will
+ * summarise a page and call it news.
  */
 const TOOLS = [
     {
@@ -1823,7 +1941,8 @@ const TOOLS = [
             "hit carries to read that page. Given neither, it lists the corpora there are. A page " +
             "answers one window at a time with the `sections` that name its parts: pass `section` " +
             "to read one part, and hand `next_offset` back as `offset` to read on. For what " +
-            "changed rather than what is true, use `search` or `changelog`.",
+            "changed rather than what is true, use `search` or `changelog`. For what Anthropic " +
+            "changed in these documentation pages themselves, dated and diffed, use `docschanges`.",
         inputSchema: {
             type: "object",
             properties: {
@@ -1841,6 +1960,61 @@ const TOOLS = [
                     description: "A heading from the page's `sections`, to read that part rather than the head.",
                 },
                 limit: { type: "number", description: "At most this many hits or pages (default 10 / 50)." },
+                ...PAGING,
+            },
+        },
+    },
+    {
+        name: "docschanges",
+        description:
+            "What Anthropic changed in their own documentation, dated and diffed. Reach for this " +
+            "whenever somebody asks whether the docs moved, what was quietly updated this week, " +
+            "when a page last changed, or what a page used to say: this site fetches the " +
+            "documentation on a timer and diffs each read against the last, so it holds a history " +
+            "nothing upstream publishes. Given nothing it answers the recent changes across every " +
+            "corpus, newest first; narrow with `source` (a corpus key, as `claude-code`) or `since` " +
+            "(a date). `date` answers one day, `days` answers the per-day totals so a caller can " +
+            "see which days were busy before reading any of them, `change` answers one edit with " +
+            "its diff, and `capture` answers one read of a corpus and everything it moved. This is " +
+            "what the documentation *changed*; `docs` is what it says.",
+        inputSchema: {
+            type: "object",
+            properties: {
+                source: {
+                    type: "string",
+                    description:
+                        "A corpus key, as `claude-code`. Omitted, every corpus at once. " +
+                        "The `docs` tool lists the keys there are.",
+                },
+                since: {
+                    type: "string",
+                    description: "Only changes recorded on or after this date, as `2026-09-01`.",
+                },
+                date: {
+                    type: "string",
+                    description:
+                        "One day of the ledger, as `2026-09-14`. A day with no changes is a " +
+                        "real answer and comes back empty rather than missing.",
+                },
+                days: {
+                    type: "boolean",
+                    description:
+                        "True for the per-day totals rather than the changes themselves: which " +
+                        "days moved, how many pages, and how many lines each way.",
+                },
+                change: {
+                    type: "number",
+                    description:
+                        "One change's `id`, as carried by every row this tool answers. Reads " +
+                        "that edit in full, with its diff as lines; long diffs page on `offset`.",
+                },
+                capture: {
+                    type: "string",
+                    description:
+                        "One capture's id, as `claude-code-20260914T033000Z`, carried by every " +
+                        "row as `capture`. Answers that one read of the corpus and what it moved.",
+                },
+                limit: { type: "number", description: "At most this many rows or diff lines (default 25)." },
                 ...PAGING,
             },
         },
@@ -2208,6 +2382,24 @@ const text = (raw) => {
     const value = typeof raw === "string" ? raw.trim() : "";
 
     return value === "" ? undefined : value;
+};
+
+/**
+ * A whole-number argument that was actually given, or nothing.
+ *
+ * Unlike `bounded` this has no fallback, because it names a row rather than
+ * sizing a window: an id nobody gave and an id that is not a number are the
+ * same answer, and the caller falls through to the list. That is the site's
+ * own reading of the same argument, kept identical on purpose.
+ */
+const whole = (raw) => {
+    if (typeof raw !== "number" && text(raw) === undefined) {
+        return undefined;
+    }
+
+    const value = Math.trunc(Number(raw));
+
+    return Number.isFinite(value) ? value : undefined;
 };
 
 /** A number argument, held inside the range the site will accept. */
