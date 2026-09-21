@@ -258,9 +258,11 @@ thirty minutes from every session is the thing that would hurt it. So:
   `cc-changelog-plugin/0.2 (+https://changelogs.core-directive.com)`, so a rate
   limit can name this plugin instead of guessing.
 
-`CC_CHANGELOG_BASE_URL` points all of it somewhere else, which is how the
-search tool was exercised against a local Laravel before `/search.json` was
-live.
+The **Site base URL** setting (`baseUrl`, in `/plugin`) points all of it
+somewhere else, which is how the search tool was exercised against a local
+Laravel before `/search.json` was live. `CC_CHANGELOG_BASE_URL` still does the
+same thing and is the one to use for a single shell invocation; the setting
+wins when both are present.
 
 The origin holds callers to 120 requests a minute each, and the API as a whole
 to 600 a minute, answering `429` with `{"error", "retry_after"}` past either.
