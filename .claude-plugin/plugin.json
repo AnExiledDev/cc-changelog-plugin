@@ -1,11 +1,19 @@
 {
   "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
   "name": "cc-changelog",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The unofficial Claude Code changelog, in your terminal",
   "author": {
     "name": "AnExiledDev",
     "email": "696222+AnExiledDev@users.noreply.github.com"
   },
-  "homepage": "https://changelogs.core-directive.com"
+  "homepage": "https://changelogs.core-directive.com",
+  "userConfig": {
+    "baseUrl": {
+      "type": "string",
+      "title": "Site base URL",
+      "description": "Where the plugin reads the changelog from. Empty uses https://changelogs.core-directive.com; a local Laravel checkout goes here.",
+      "default": ""
+    }
+  }
 }

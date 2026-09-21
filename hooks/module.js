@@ -310,8 +310,16 @@ const ASKS = [
     { label: "Never mind", prompt: undefined },
 ];
 
+/**
+ * The manifest's `userConfig`, as `register` was handed it. Module-scoped
+ * because `baseUrl` is resolved far from the registration.
+ */
+let options = {};
+
 /** @type {import('claude-code').Register} */
-export const register = (on) => {
+export const register = (on, pluginOptions) => {
+    options = pluginOptions ?? {};
+
     on("session.start", async ($, e, next) => {
         await $.command.register({
             name: "whatsnew",
@@ -2564,10 +2572,13 @@ const loadFeed = async ($) => {
 
 const baseUrl = async ($) => {
     // An override so the plugin can be run against a checkout of the site
-    // (`php artisan serve`) before a change to it is live.
-    const override = await $.env.get("CC_CHANGELOG_BASE_URL");
+    // (`php artisan serve`) before a change to it is live. The manifest's
+    // `baseUrl` is the discoverable half and wins; the variable stays because
+    // it is what a one-off shell invocation already sets.
+    const declared = typeof options.baseUrl === "string" ? options.baseUrl.trim() : "";
+    const override = declared || (await $.env.get("CC_CHANGELOG_BASE_URL"));
 
-    return (override ?? DEFAULT_BASE).replace(/\/+$/, "");
+    return (override || DEFAULT_BASE).replace(/\/+$/, "");
 };
 
 const fetchJson = async ($, url) => {
