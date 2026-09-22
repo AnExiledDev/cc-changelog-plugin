@@ -18,9 +18,9 @@ Nothing in the 192-page docs corpus captured on 2026-09-11 names `modules`,
 The build documents itself, though, and only once the flag is on: it carries a
 `plugin-authoring` skill and a `/plugin-types` command, both gated on the same
 switch as the runtime. `/plugin-types` writes `claude-code.d.ts` out of the
-running build - 450 KB of declarations, every event's input and result, every
+running build - 493 KB of declarations, every event's input and result, every
 method on `$`, every element's props. `types/claude-code.d.ts` here is the copy
-v2.1.278 wrote. **It is the authority; the notes below are the map to it.**
+v2.1.280 wrote. **It is the authority; the notes below are the map to it.**
 
 ## Provenance
 
@@ -375,12 +375,12 @@ walk rather than a download.
 
 ## The types
 
-`types/claude-code.d.ts` is the plugin API itself: 450 KB of declarations
+`types/claude-code.d.ts` is the plugin API itself: 493 KB of declarations
 covering every event's input and result, every method on `$`, and every
 element's props. **It is the authority and this README is the map to it.**
 
 Nobody wrote it. Claude Code writes it out of the running build when you type
-`/plugin-types`, and the copy here is what 2.1.278 wrote. It is early access
+`/plugin-types`, and the copy here is what 2.1.280 wrote. It is early access
 and may move between releases without notice, so regenerate against your own
 build rather than trusting this file's age. `types/README.md` has how, and the
 terms it is published under, which are not this repository's MIT.

@@ -1,4 +1,4 @@
-// Written by Claude Code 2.1.278.
+// Written by Claude Code 2.1.280.
 // Claude Code function hooks: the plugin API's TypeScript declarations.
 //
 // EARLY ACCESS: this surface may change between releases without notice.
@@ -455,6 +455,46 @@ declare module 'claude-code' {
   type AnyKeyOf<I> = I extends unknown ? keyof I : never;
 
   /**
+   * One content block of an ApiMessage: `type` names its kind (`text`,
+   * `tool_use`, `tool_result`, `image`, `document`, `thinking`, ...).
+   *
+   * The other fields are that kind's as the Messages API defines them (see its
+   * reference); the engine hands the block over as it holds it, nothing renamed
+   * or dropped.
+   */
+  type ApiContentBlock = {
+      /**
+       * The block's kind; the rest of the block is that kind's fields.
+       */
+      type: string;
+      [field: string]: unknown;
+  };
+
+  /**
+   * One message of the conversation in Messages API form, as
+   * `$.session.messages({ as: "api" })` returns it.
+   *
+   * The messages are the ones the next request is built from, after the
+   * engine's normalization (the last compaction's summary in place of what it
+   * replaced, reminders as text blocks); at most 4096, opening on a user one.
+   */
+  type ApiMessage = {
+      /**
+       * Who wrote it.
+       */
+      role: 'user' | 'assistant';
+      /**
+       * Its blocks in order, always an array: text, tool_use and tool_result
+       * (paired across an assistant message and the next), image and document.
+       *
+       * Media inline as the engine holds it, thinking as it goes back. In no
+       * message: the system prompt, the tool list, and what one send adds for
+       * its model (cache marks, reminders promoted to system turns).
+       */
+      content: ApiContentBlock[];
+  };
+
+  /**
    * The argument of event `N`: `e` in its hooks, and what its call takes. For a
    * union of names, the union of their arguments.
    */
@@ -819,9 +859,9 @@ declare module 'claude-code' {
        * One digit (`"1"`) or one lowercase letter (`"w"`) that presses it while
        * the plugin's site holds the focus; anything else is refused.
        *
-       * The band after ctrl+x tab or a click, a focused `Pane`; never from the
-       * composer, save a bare digit in an empty one pressing a band Button, as a
-       * survey is answered. Shift+w matches `"w"`; two on one key, the later wins.
+       * Its site holds it after ctrl+x tab, a click or `open({ focus })`: the band
+       * or its `Pane`; never the composer, save that a bare digit in an empty one
+       * answers a band Button (a survey). Shift+w is `"w"`; two clash, later wins.
        */
       hotkey?: string;
       /**
@@ -917,6 +957,10 @@ declare module 'claude-code' {
        * One piece of the model's response (TurnStepChunk).
        */
       'turn.step': TurnStepChunk;
+      /**
+       * One piece of the child's output (ProcessSpawnChunk).
+       */
+      'process.spawn': ProcessSpawnChunk;
   };
 
   /**
@@ -941,8 +985,8 @@ declare module 'claude-code' {
   export type ClassicEventName = `classic.${ClassicHookEvent}`;
 
   /**
-   * The classic (settings) hook events, one per classic event name: `e` is
-   * what the classic hook receives on stdin for that event.
+   * The classic (settings) hook events, one per classic event name: `e` is the
+   * hook's whole stdin input, base fields (`transcript_path`, `cwd`) included.
    *
    * The chain is [managed settings hooks, ...hooks modules, the other settings
    * hooks as core], so a managed block ends it above every module. In shape
@@ -1787,29 +1831,6 @@ declare module 'claude-code' {
   };
 
   /**
-   * The token counts the last API response of the live window reported, as
-   * the API spells them; the breakdown's `Messages` row is reconciled to it.
-   */
-  export type ContextApiUsage = {
-      /**
-       * Uncached input tokens the response was answered over.
-       */
-      input_tokens: number;
-      /**
-       * Tokens the response generated.
-       */
-      output_tokens: number;
-      /**
-       * Input tokens written to the prompt cache by the request.
-       */
-      cache_creation_input_tokens: number;
-      /**
-       * Input tokens read from the prompt cache by the request.
-       */
-      cache_read_input_tokens: number;
-  };
-
-  /**
    * How a context breakdown is counted: `full` with the token-count API per
    * category, `summary` from the last response's usage and local estimates.
    *
@@ -2028,8 +2049,8 @@ declare module 'claude-code' {
           root: string;
       };
       /**
-       * Display: a line under an open dialog, a redraw or a repaint, a
-       * transcript or debug line, panes the surface places, a window or ring.
+       * Display: a line under an open dialog, a redraw or a repaint, a log line,
+       * panes the surface places, a window or ring, a surface's clipboard.
        */
       ui: {
           /**
@@ -2152,22 +2173,28 @@ declare module 'claude-code' {
            */
           status: (text: string | undefined) => void;
           /**
-           * Opens a pane: a framed region the surface places, whose body this
-           * plugin draws by hooking `ui.render` for `{ component: "Pane" }`.
+           * Opens a pane, a framed region the surface places and this plugin draws
+           * by hooking `ui.render` for `{ component: "Pane" }`; says if it is drawn.
            *
-           * One instance per id (`requestId`): opening an open id retitles it; a hook
-           * on `ui.open` may refuse it. The keyboard is the person's; unasked, it
-           * waits undrawn below 144 columns (110 once asked), judged at each open.
+           * One per id (an open id retitles; a `ui.open` hook may refuse). Asked,
+           * the person's command, prompt or press behind it (not `focus`), it is
+           * placed at any width; unasked, from 144 columns, 110 for one once asked.
            *
+           * @remarks Below that it waits undrawn (`$.ui.panes()`: `isPlaced` false)
+           *   until they open it or the terminal widens; a `-p` run places all.
            * @param pane `id` (1-64 of letters, digits, `_`, `-`), `title`, `focus`,
            *   `closeOnEscape` and `holdToasts` (a dialog), `rows` / `columns` wanted
-           * @returns settles once the pane is open (or retitled)
+           * @returns `{ isPlaced: true }` once drawn (or retitled), else `{ isPlaced:
+           *   false, reason }` (UiOpenResult); `dock` or `inline` is on `Pane` props
            * @example
            * await $.ui.open({ id: "clock", title: "Clock" })
            * @example
            * await $.ui.open({ id: "ask", focus: true, closeOnEscape: true, rows: 9 })
+           * @example
+           * const opened = await $.ui.open({ id: "clock" })
+           * if (!opened.isPlaced) $.ui.toast("clock: widen the terminal to see it")
            */
-          open: (pane: PaneOpenArgs) => Promise<void>;
+          open: (pane: PaneOpenArgs) => Promise<UiOpenResult>;
           /**
            * Closes one of the open panes; an id that is not open is left alone.
            *
@@ -2214,17 +2241,32 @@ declare module 'claude-code' {
            * Moves the focus ring of one of this plugin's sites onto an element it
            * drew there, as the DOM's `element.focus()`, while it holds the keys.
            *
-           * Raised as the event `ui.focus`, origin `plugin`; the engine's inverse
-           * marks the element. The keyboard is the person's to give: a site not
-           * holding it, or holding it on another plugin's element, is `{ deny }`.
+           * Raised as `ui.focus`, origin `plugin`; the engine's inverse marks it.
+           * A site not holding the keys, or holding them on another's element, is
+           * `{ deny }`; an element not yet drawn is awaited, bounded: no retrying.
            *
            * @param args `requestId` (which site: a pane's id, the band's) and `key`
            *             (the element's, as drawn)
            * @returns `{}` once it moved, or `{ deny }` saying why not
            * @example
-           * onPress: () => $.ui.focus({ requestId: "files", key: "row:0" })
+           * await $.ui.open({ id: "files", focus: true })
+           * await $.ui.focus({ requestId: "files", key: "row:0" })
            */
           focus: (args: UiFocusArgs) => Promise<UiFocusResult>;
+          /**
+           * Puts `text` on the clipboard of a surface the session draws on, as the
+           * DOM's `navigator.clipboard.writeText`, and says whether it took.
+           *
+           * `surface` names which (a press hook passes `e.surface`); left out, the
+           * session's first. Raised as `ui.copy` with that target on `e`. The
+           * terminal writes as `/copy` does; a remote surface has no path yet.
+           *
+           * @param args `text`, what the person pastes; `surface`, where
+           * @returns `{ isCopied: true }`, or `{ isCopied: false, reason }`
+           * @example
+           * onPress: press => $.ui.copy({ text: url, surface: press.surface })
+           */
+          copy: (args: UiCopyArgs) => Promise<UiCopyResult>;
       };
       /**
        * Completions through the session's own client and credentials.
@@ -2232,34 +2274,39 @@ declare module 'claude-code' {
       model: {
           /**
            * Runs one text completion through the session's own API client and
-           * resolves to the reply's text.
+           * resolves a result: the reply's text and cost, or why there is no text.
            *
            * No tools, no history, no system prompt beyond the CLI's identity block
-           * and `request.system`.
+           * and `request.system`; ModelCompleteRequest says the rest. Only a request
+           * the engine refuses to send (a blocked model, a bad cap) rejects.
            *
-           * @param request the model (an alias such as `haiku`, or a full id,
-           *   resolved like a `--model` value), the prompt, and a token cap
-           * @returns the reply's text
+           * @param request the model (an alias such as `haiku`, or a full id
+           *                resolved like `--model`), prompt, cap, effort, time limit
+           * @returns the reply (`isAnswered`, `text`, `usage`), else the `reason`:
+           *          `api-error` with `status` and `error`, `empty-reply`, `aborted`
            * @example
-           * const reply = await $.model.complete({ model: "haiku", prompt: "Hi." })
+           * const r = await $.model.complete({ model: "haiku", prompt, effort })
            */
-          complete: (request: ModelCompleteRequest) => Promise<string>;
+          complete: (request: ModelCompleteRequest) => Promise<ModelCompleteResult>;
           /**
-           * Runs one tool-less completion over the session's OWN transcript, sharing
-           * the main thread's prompt cache; the reply's text and the fork's usage.
+           * Runs one tool-less completion over the session's OWN transcript as the
+           * main thread last sent it, so the API serves that prefix from its cache.
            *
-           * Not `complete`: sharing the cache prefix means the model and system
-           * prompt are the session's, read from its last turn's cache-safe snapshot,
-           * and tools are denied. Null on a cold snapshot or an API error.
+           * The main thread's last request again (its model, system prompt, tools,
+           * messages) with `prompt` after it: every tool denied, its own tail never
+           * cached, the prefix billed afresh once the entry lapsed or after `/model`.
            *
            * @param request the one user message the fork answers
-           * @returns the reply's text with the fork's usage, or null on a cold
-           *          snapshot or an API error
+           * @returns always a result, never null: the reply (`isAnswered`, `text`,
+           *          `usage`), or why there is no text (`reason`: `nothing-to-fork`
+           *          before the first response and after `/clear`, `api-error` with
+           *          its HTTP `status` and `error` kind, `empty-reply`, or `aborted`
+           *          when the turn whose hook forked was interrupted)
            * @example
            * const reply = await $.model.fork({ prompt: "One line to learn?" })
-           * if (reply !== null) $.ui.log(`${reply.usage.output_tokens} tokens`)
+           * $.ui.log(reply.isAnswered ? reply.text : `no reply: ${reply.reason}`)
            */
-          fork: (request: ModelForkRequest) => Promise<ModelForkResult | null>;
+          fork: (request: ModelForkRequest) => Promise<ModelForkResult>;
           /**
            * Picks one of `labels` for `text` with one completion over
            * `$.model.complete` and a fixed classifier prompt.
@@ -2340,21 +2387,43 @@ declare module 'claude-code' {
           call: (server: string, tool: string, args?: Record<string, unknown>) => Promise<McpToolResult>;
       };
       /**
-       * The running session, read as plain data, and compacting it.
+       * The running session, read as plain data; compacting it; and sending a
+       * message from it to another agent or session.
        */
       session: {
           /**
-           * Returns the transcript so far, one entry per user or assistant
+           * Returns the transcript so far, one SessionMessage per user or assistant
            * message; progress rows, `$.ui.log` lines and notices are not messages.
            *
-           * Each entry is a SessionMessage, `{ role, text, toolUses }` (a user
-           * message may add `toolResults`; a `toolUses` entry adds its `result` and
-           * `text` once answered). A long transcript answers its newest 4096.
+           * With `{ agentId }`, one of this session's agents' instead (a subagent, a
+           * fork, a teammate in this process): what the session saved for it joined
+           * with what the engine holds. With `{ as: "api" }`, either as ApiMessage.
            *
+           * @param args `agentId`, the id `tool.call`, `turn.complete` and `$.agent
+           *             .list()` carry; `as: "api"` for ApiMessage; hooks see both
+           * @returns the newest 4096 entries, `{ role, text, toolUses }` (a user
+           *          message may add `toolResults`; a `toolUses` entry adds `result`
+           *          and `text` once answered, an Agent tool use its `agentId`), or
+           *          with `as` `{ role, content }`, blocks intact, at most 4096
+           *          opening on a user message; for an `agentId` the session
+           *          cannot read, `{ deny }` (SessionMessagesDeny), never main
            * @example
            * const last = (await $.session.messages()).at(-1)
+           * @example
+           * const request = await $.session.messages({ as: "api" })
+           * await $.http.fetch(AUDIT_URL, {
+           *   method: "POST",
+           *   body: JSON.stringify({ session: await $.session.id(), request }),
+           * })
+           * @example
+           * on("turn.complete", async ($, e, next) => {
+           *   if (e.agentId === undefined) return next(e)
+           *   const found = await $.session.messages({ agentId: e.agentId })
+           *   if (!("deny" in found)) $.ui.log(`${found.length} messages`)
+           *   return next(e)
+           * })
            */
-          messages: () => Promise<SessionMessage[]>;
+          messages: SessionMessagesCall;
           /**
            * Returns the directory the session runs in, absolute.
            */
@@ -2409,8 +2478,8 @@ declare module 'claude-code' {
            */
           surface: () => Promise<RenderSurface | null>;
           /**
-           * Returns the context window's fill, the rate-limit windows and the
-           * cost, as the status line has them; with `breakdown`, by category too.
+           * Returns when the session began, and the context window's fill, the
+           * rate-limit windows and the cost as the status line has them, itemized.
            *
            * The plain call costs nothing; `"full"` counts each category with the
            * token-count API as /context does, `"summary"` estimates locally, and
@@ -2418,10 +2487,13 @@ declare module 'claude-code' {
            *
            * @param args `{ breakdown, columns }`: how the breakdown is counted and
            *   the width its grid is drawn in; nothing for the status line's figures
-           * @returns `{ context, rateLimits, cost }` as the status line has them
+           * @returns `{ startedAt, context, rateLimits, cost }` as the status line
+           *   has them
            * @example
            * const { context } = await $.session.usage()
            * if ((context.percent ?? 0) >= 85) await $.session.compact()
+           * @example
+           * const isOlder = stat.mtimeMs < (await $.session.usage()).startedAt
            * @example
            * const usage = await $.session.usage({ breakdown: "full", columns })
            * for (const row of usage.context.breakdown?.gridRows ?? []) draw(row)
@@ -2440,12 +2512,26 @@ declare module 'claude-code' {
            */
           compact: EventCalls['session']['compact'];
           /**
+           * Sends a plain-text message to another agent or session: the event
+           * `session.send`, the model's SendMessage tool's own call and delivery.
+           *
+           * `to` is the tool's spelling (a name, an agent id, a received `from`
+           * address) or `{ sessionId }` / `{ agentId }`; framed at the receiver as a
+           * peer's, `origin.plugin` naming this plugin there. Resolves once queued.
+           *
+           * @example
+           * const sent = await $.session.send({ to: { sessionId }, text: "ok" })
+           * @example
+           * await $.session.send({ to: { agentId }, text: "stop after this file" })
+           */
+          send: EventCalls['session']['send'];
+          /**
            * Holds the session's Anthropic credential on the host and answers an
            * opaque handle and its kind; the secret never reaches the plugin.
            *
            * The handle is spent through `$.http.fetch(url, { auth: handle })`,
            * which sets the credential header, only for a first-party host. Null
-           * where the build or the provider has no first-party credential to hold.
+           * with no first-party credential (a 3P provider, a gateway, no login).
            *
            * @example
            * await $.http.fetch(url, { auth: (await $.session.authorize())?.handle })
@@ -2477,7 +2563,7 @@ declare module 'claude-code' {
       prompt: {
           /**
            * Submits a prompt: the event `prompt.submit`, the same call the engine
-           * makes for a typed prompt; `input.text` runs when the session is idle.
+           * makes for a typed prompt; a turn of its own, once the session is idle.
            *
            * It goes through every hook but the calling one (the plugin's others
            * see it) with `e.origin` `{ kind: 'plugin', name }`, the name the
@@ -2871,6 +2957,10 @@ declare module 'claude-code' {
           /**
            * Resolves after `ms` milliseconds; rejects at once when `signal` aborts.
            *
+           * The wait is the hook's own time and its budget runs on through it, as
+           * through no other `$` call: a `turn.step` generator that polls with it
+           * pays every sleep out of its one budget (`next.budget.remainingMs`).
+           *
            * @param ms how long, in milliseconds
            * @param options `signal`: ends the wait early with a rejection (pass
            *   `next.signal` so a hook's wait ends with its dispatch)
@@ -2945,6 +3035,44 @@ declare module 'claude-code' {
            * const { exitCode, stdout } = await $.process.run(["git", "status"])
            */
           run: (argv: readonly string[], init?: ProcessRunInit) => Promise<ProcessRunResult>;
+          /**
+           * Starts a command on the host by its argument vector (no shell) and
+           * streams what it writes, piece by piece, then how it ended.
+           *
+           * The loop is the child's life: leaving it, `return()` on the stream,
+           * `next.signal` aborting or the module unloading kills the child, and
+           * nothing else does, a hook's return included: end the loop to end it.
+           *
+           * @param request `{ argv, cwd, env, input }`, `$.process.run`'s rules;
+           *   `e` for a hook on `process.spawn` (a generator, its budget per piece)
+           * @returns the pieces `{ stream, text }` (text as it came, not lines),
+           *   then `{ code, signal }`; rejects its first pull if it cannot start
+           * @example
+           * // inline: the hook's dispatch waits on the loop; leaving it kills make
+           * const make = $.process.spawn({ argv: ["make"], cwd: "build" })
+           * for await (const { stream, text } of make) {
+           *   if (stream === "stderr" && text.includes("error")) break
+           * }
+           * @example
+           * // a child for the session's life: the loop runs on after the hook
+           * // returns, and ends with the child or with the module
+           * on("session.start", async ($, e, next) => {
+           *   const started = await next(e)
+           *   void (async () => {
+           *     const bridge = $.process.spawn({ argv: ["bridge", "watch", e.cwd] })
+           *     for await (const { text } of bridge) $.ui.log(text, { to: "debug" })
+           *   })()
+           *   return started
+           * })
+           * @example
+           * // above another plugin's spawn: redact each piece before it reads it
+           * on("process.spawn", async function* ($, e, next) {
+           *   for await (const chunk of next(e)) {
+           *     yield { ...chunk, text: chunk.text.replaceAll(token, "***") }
+           *   }
+           * })
+           */
+          spawn: (request: ProcessSpawnRequest) => HookStream<ProcessSpawnChunk, ProcessSpawnResult>;
       };
       /**
        * What the settings files, `--settings` and managed policy hold, as the
@@ -3512,13 +3640,25 @@ declare module 'claude-code' {
        * message, a Remote Control prompt), before it is queued; `{ text }`.
        *
        * Rewrite with `next({ ...e, text })`, or return `{ consumed: reason }` to
-       * take it: nothing is queued, shown or read by the model. `origin` and
-       * `event` pass on as received; `session.send`, its dual, is reserved.
+       * take it: nothing is queued, shown or read by the model. `origin`,
+       * `event` and `agentId` pass on as received; `session.send` is its dual.
        *
        * @example
        * on("session.receive", { origin: "peer" }, () => ({ consumed: "muted" }))
        */
       'session.receive': SessionReceiveInput;
+      /**
+       * Fires when a plain-text message is about to leave this conversation for
+       * another agent or session (the SendMessage tool, or `$.session.send`).
+       *
+       * `e.origin` says who sends, `e.agentId` which loop. Rewrite `text` or
+       * readdress `to` with `next` (a new `to` is judged again); `{ isDelivered:
+       * false, reason }` without `next` refuses it. `next(e)` resolves queued.
+       *
+       * @example
+       * on("session.send", ($, e, next) => next({ ...e, text: redact(e.text) }))
+       */
+      'session.send': SessionSendInput;
       /**
        * Fires when the conversation is about to be compacted (`/compact`, the
        * threshold, a plugin, or ahead of time); `next(e)` resolves `{ messages }`.
@@ -3546,6 +3686,9 @@ declare module 'claude-code' {
       /**
        * Fires when a client leaves the roster: it detached, or the session ended
        * with it attached (`e.reason`). Observe; `next(e)` echoes `{ clientId }`.
+       *
+       * With reason `end` it runs inside `session.end`'s one short bound: there
+       * `next.budget` reads that bound and `next.signal` aborts at it.
        */
       'session.detach': SessionDetachInput;
       /**
@@ -3564,12 +3707,12 @@ declare module 'claude-code' {
        * Fires once when the session ends (exit, /clear, resume, logout, signal, a
        * `-p` run done), after its SessionEnd settings hooks; `e.reason` says which.
        *
-       * `e.resume.id` is `--resume`'s id; `next(e)` runs the engine's end step for
-       * the plugins (at an exit the attached clients leave): `{ sessionId }`. The
-       * SessionEnd bound afresh, 1.5 s by default; a `kill -9` raises nothing.
+       * `next(e)` runs the engine's end step, `{ sessionId }`; `e.resume.id` is
+       * `--resume`'s. Exits stay fast whatever is loaded: the whole chain shares
+       * one short wall-clock bound, which `next.budget` reads (SessionEndInput).
        *
        * @example
-       * on("session.end", async ($, e, next) => (await keep(e.resume), next(e)))
+       * on("session.end", async ($, e, next) => (await save(next.budget), next(e)))
        */
       'session.end': SessionEndInput;
       /**
@@ -3764,6 +3907,10 @@ declare module 'claude-code' {
        */
       'session.receive': SessionReceiveResult;
       /**
+       * `{ isDelivered: true }`, or `{ isDelivered: false, reason }`.
+       */
+      'session.send': SessionSendResult;
+      /**
        * `{ messages, tokensBefore?, tokensAfter? }`, or `{ skip }`.
        */
       'session.compact': SessionCompactResult;
@@ -3849,6 +3996,7 @@ declare module 'claude-code' {
       session: {
           start: (input: SessionStartInput) => Promise<SessionStartResult>;
           receive: (input: SessionReceiveInput) => Promise<SessionReceiveResult>;
+          send: (input: SessionSendArgs) => Promise<SessionSendResult>;
           compact: (input?: SessionCompactArgs) => Promise<SessionCompactResult>;
           attach: (input: SessionAttachInput) => Promise<SessionAttachResult>;
           detach: (input: SessionDetachInput) => Promise<SessionDetachResult>;
@@ -4182,9 +4330,9 @@ declare module 'claude-code' {
        * A hook's budget per dispatch, from its call to its return; past it the
        * hook is absent (its `.catch` asked, else `next(e)` run on its behalf).
        *
-       * A streaming hook's (`turn.step`, an async generator) spans its whole
-       * run and counts only while its own code runs: never at a `yield`, never
-       * while it reads the stream beneath. Not per chunk: the sum of its work.
+       * A streaming hook's (an async generator) counts only while its own code
+       * runs, never at a `yield` or while it reads beneath: on `turn.step` the
+       * sum over the response; on `process.spawn` per piece, anew at each pull.
        */
       readonly ms: 10_000;
       /**
@@ -4241,7 +4389,7 @@ declare module 'claude-code' {
 
   /**
    * The hook event `E` takes: an async generator over its chunks for a
-   * streaming event (`turn.step`), `($, e, next) => result` for every other.
+   * streaming event (StreamingEventName), `($, e, next) => result` otherwise.
    */
   export type HookOf<E extends EventName> = Events[E];
 
@@ -5027,6 +5175,16 @@ declare module 'claude-code' {
   };
 
   /**
+   * Which kind of API failure ended a model call (a completion, a fork), in
+   * the word Claude Code classifies every API error with (StopFailure's).
+   *
+   * `rate_limit`, `overloaded` and `server_error` may clear on their own;
+   * `authentication_failed`, `billing_error`, `invalid_request`,
+   * `model_not_found` will not; `unknown` fits none of the named kinds.
+   */
+  export type ModelApiError = ClassicHookInputs['StopFailure']['error'];
+
+  /**
    * What `$.model.complete` takes.
    */
   export type ModelCompleteRequest = {
@@ -5036,7 +5194,11 @@ declare module 'claude-code' {
        */
       model: string;
       /**
-       * The one user message; the reply's text comes back.
+       * The one user message.
+       *
+       * The result always says what happened: the reply's text and usage when
+       * the model answered, else a `reason` (an API error with its status, a
+       * reply with no text, or the call cut short).
        */
       prompt: string;
       /**
@@ -5053,44 +5215,213 @@ declare module 'claude-code' {
        * is refused, naming it.
        */
       maxTokens?: number;
+      /**
+       * How hard the model thinks about it (ModelEffort): `low` for a cheap
+       * label, `max` for a hard judgment. Default: the model's own.
+       *
+       * Sent as the request's effort where the model takes one and dropped
+       * where it does not, as the session's own requests do; a value outside
+       * the five levels is refused.
+       *
+       * @example
+       * await $.model.complete({ model: "haiku", prompt, effort: "low" })
+       */
+      effort?: ModelEffort;
+      /**
+       * How long the whole call may take, in milliseconds, before it resolves
+       * `aborted` and the request is abandoned; default none.
+       *
+       * A `$` call's time never counts against the calling hook's budget, so this
+       * is how a hook bounds the completion itself, by the clock. A positive whole
+       * number, held to what a timer holds (2147483647); anything else is refused.
+       *
+       * @example
+       * await $.model.complete({ model: "haiku", prompt, timeoutMs: 8000 })
+       */
+      timeoutMs?: number;
   };
+
+  /**
+   * What one model call resolves to: the reply when the model answered
+   * (`isAnswered`), else which of three things left it without text (`reason`).
+   *
+   * `$.model.complete`'s result whole, and `$.model.fork`'s once it had
+   * something to fork. What the provider did never rejects the call, so a
+   * plugin branches on `isAnswered` and `reason`; `usage` rides every arm.
+   *
+   * @example
+   * const r = await $.model.complete(ask); if (!r.isAnswered) log(r.reason)
+   */
+  export type ModelCompleteResult = {
+      /**
+       * True: the model answered; `text` and `usage` are its reply.
+       *
+       * @example
+       * if (r.isAnswered) spent += r.usage.output_tokens
+       */
+      isAnswered: true;
+      /**
+       * The reply's text: a completion's text blocks joined; on a fork, the
+       * non-error replies' text joined by newlines.
+       */
+      text: string;
+      /**
+       * What the call cost (ModelUsage); on a fork its completions summed.
+       *
+       * On a fork `cache_read_input_tokens` is how much of the transcript
+       * the main thread's prompt cache served: near zero, the fork paid for
+       * the whole prefix (the entry lapsed, or the model changed since).
+       */
+      usage: ModelUsage;
+  } | {
+      isAnswered: false;
+      /**
+       * The API answered with an error and no reply carried text.
+       *
+       * @example
+       * if (!r.isAnswered && r.reason === "api-error") retry(r.status)
+       */
+      reason: 'api-error';
+      /**
+       * The error reply's HTTP status (429, 500, 529, ...); null when no
+       * response arrived at all (a dropped connection, a provider timeout).
+       */
+      status: number | null;
+      /**
+       * Which kind of failure, as Claude Code classifies API errors; never
+       * the error's text or body.
+       *
+       * `rate_limit`, `overloaded`, `invalid_request`,
+       * `authentication_failed`, `server_error`, ...; `unknown` when it fits
+       * none of the named kinds.
+       */
+      error: ModelApiError;
+      /**
+       * What the call cost before it failed: all zeros for a completion (its
+       * one request was the one refused); on a fork, the turns before it.
+       */
+      usage: ModelUsage;
+  } | {
+      isAnswered: false;
+      /**
+       * The model replied and its reply carried no text.
+       *
+       * A completion whose content held no text block, or a fork answered
+       * with a tool attempt alone (denied, as every fork tool is) or nothing.
+       *
+       * @example
+       * if (!r.isAnswered && r.reason === "empty-reply") $.ui.log("no words")
+       */
+      reason: 'empty-reply';
+      /**
+       * What the call cost.
+       */
+      usage: ModelUsage;
+  } | {
+      isAnswered: false;
+      /**
+       * The call was cut before a reply came; whatever had come back is
+       * discarded.
+       *
+       * The dispatch that made the call was aborted while it ran (escape on
+       * the turn whose hook called; the plugin's environment unloaded), or a
+       * completion's own `timeoutMs` elapsed and the request was abandoned.
+       *
+       * @example
+       * if (!r.isAnswered && r.reason === "aborted") return next(e)
+       */
+      reason: 'aborted';
+      /**
+       * What the call cost before it was cut: all zeros for a completion (no
+       * response arrived); on a fork, what came back before the abort.
+       */
+      usage: ModelUsage;
+  };
+
+  /**
+   * How hard a request asks the model to think, by the levels the engine and
+   * `turn.step` name: `low` to `max`, `xhigh` between `high` and `max`.
+   *
+   * A model that takes no effort setting is sent none, whatever is asked.
+   */
+  export type ModelEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
   /**
    * What `$.model.fork` takes.
    */
   export type ModelForkRequest = {
       /**
-       * The one user message, appended to the session's own transcript.
+       * The one user message, appended to the session's own transcript as the
+       * main thread last sent it.
        *
-       * The reply's text and usage come back, or null on an API error or a cold
-       * transcript.
+       * The result always says what happened: the reply's text and usage when
+       * the fork answered, else a `reason` (nothing to fork yet, an API error
+       * with its status, a reply with no text, or the turn's abort cut it).
        */
       prompt: string;
   };
 
   /**
-   * What `$.model.fork` resolves to when the fork answered: the reply's text
-   * and what the fork cost.
+   * What `$.model.fork` resolves to: a completion's result (ModelCompleteResult)
+   * or that there was nothing to fork yet.
+   *
+   * The completion's arms are the reply when the fork answered, else
+   * `api-error`, `empty-reply` or `aborted`, `usage` on each.
+   *
+   * @example
+   * const r = await $.model.fork({ prompt }); if (!r.isAnswered) log(r.reason)
    */
-  export type ModelForkResult = {
+  export type ModelForkResult = ModelCompleteResult | {
+      isAnswered: false;
       /**
-       * The non-error replies' text, joined by newlines.
+       * Nothing to fork, so no request was made: this conversation's main
+       * thread has produced no response yet.
+       *
+       * A new session before its first turn ends; again right after a
+       * `/clear`, or a resume that starts the conversation afresh.
+       *
+       * @example
+       * if (!r.isAnswered && r.reason === "nothing-to-fork") return next(e)
        */
-      text: string;
-      /**
-       * The fork's token counts, so a plugin can account for what it spent.
-       */
-      usage: ModelForkUsage;
+      reason: 'nothing-to-fork';
   };
 
   /**
-   * What one fork cost, as the API counted it: the four token counts of the
-   * fork's completions summed.
+   * What one model call cost, as the API counted it: the four token counts in
+   * the API's spelling, summed over the call's responses when it made several.
+   *
+   * The one shape every place that reports a call's cost uses:
+   * `$.model.complete`'s result on every arm and `$.model.fork`'s on each arm
+   * where a request was made (ModelCompleteResult), `session.compact`'s result
+   * when core ran the summarizer, `turn.step` and `turn.complete` (TurnUsage,
+   * which adds the `model` that answered), and the context breakdown's
+   * `apiUsage` (the live window's last response). All four counts are always
+   * present; a count the response left out reads as zero.
+   *
+   * @example
+   * const r = await $.model.complete(ask); if (r.isAnswered) spend(r.usage)
    */
-  export type ModelForkUsage = {
+  export type ModelUsage = {
+      /**
+       * Uncached input tokens the call was answered over: the part of the
+       * prompt neither read from nor written to the prompt cache.
+       */
       input_tokens: number;
+      /**
+       * Tokens the call generated.
+       */
       output_tokens: number;
+      /**
+       * Input tokens the prompt cache served.
+       *
+       * On a fork, how much of the main thread's transcript the cache still
+       * held: near zero, the fork paid for the whole prefix (the entry had
+       * lapsed, or the model changed since it was made).
+       */
       cache_read_input_tokens: number;
+      /**
+       * Input tokens the call wrote to the prompt cache.
+       */
       cache_creation_input_tokens: number;
   };
 
@@ -5245,7 +5576,8 @@ declare module 'claude-code' {
        * read fresh on each access; HookBudget says what the clock counts.
        *
        * It stands still while a `next` or `$` call of the hook's is in flight;
-       * in a `.catch` handler it is the grace, `ms` being `next.error.budget`.
+       * in a `.catch` handler it is the grace, `ms` being `next.error.budget`;
+       * at `session.end` it reads the exit's one short bound, which never stops.
        *
        * @example
        * if (next.budget.remainingMs < 2_000) return next(e) // skip the polish
@@ -5258,7 +5590,7 @@ declare module 'claude-code' {
    * and what is left of it now, plain data read fresh on each access.
    *
    * In a hook `ms` is HookBudget's `ms`; in a `.catch` handler its `catchMs`
-   * (equal to `next.error.budget`); on a `next` nothing meters (the engine's
+   * (what `next.error.budget` names); on a `next` nothing meters (the engine's
    * own, a test's root one) `ms` is 0 and `remainingMs` Infinity.
    *
    * @example
@@ -5267,11 +5599,19 @@ declare module 'claude-code' {
   export type NextBudget = {
       /**
        * The whole budget in milliseconds; 0 where nothing meters this `next`.
+       *
+       * On a dispatch the engine cuts short as a whole (`session.end`: one short
+       * wall-clock bound for the entire chain, so an exit stays fast whatever is
+       * loaded) it is no more than that cut left when the hook started, 0 past it.
        */
       readonly ms: number;
       /**
        * What is left of it now, in milliseconds, never below 0; Infinity where
        * nothing meters. It stands still while a `next` or `$` call is in flight.
+       *
+       * Except under a cut of the whole dispatch (`session.end`): the cut's clock
+       * never stops, `$` waits included, and this reads no more than it leaves,
+       * so a later hook in that chain starts with what the earlier ones left.
        */
       readonly remainingMs: number;
   };
@@ -5516,9 +5856,10 @@ declare module 'claude-code' {
        */
       'session.id': NoArgs;
       /**
-       * The argument of `$.session.messages()`.
+       * The argument of `$.session.messages(args)`: `{}` for the main
+       * conversation, `{ agentId }` for one of its agents, `as` for the form.
        */
-      'session.messages': NoArgs;
+      'session.messages': SessionMessagesArgs;
       /**
        * The argument of `$.session.repo()`.
        */
@@ -5629,6 +5970,11 @@ declare module 'claude-code' {
        */
       'ui.panes': NoArgs;
       /**
+       * The argument of `$.ui.copy({ text, surface })`, `surface` filled with
+       * the session's first when left out; rewritable, deniable, answerable.
+       */
+      'ui.copy': UiCopyArgs;
+      /**
        * The argument of `$.ui.blit(...)`: a Raster's `cells` or a keyed Image's
        * `source`; a hook above may rewrite either with `next`, or `{ deny }`.
        */
@@ -5729,6 +6075,10 @@ declare module 'claude-code' {
           init?: ProcessRunInit;
       };
       /**
+       * The argument of `$.process.spawn(request)`: the request itself.
+       */
+      'process.spawn': ProcessSpawnRequest;
+      /**
        * The argument of `$.settings.read({ source })`.
        */
       'settings.read': SettingsReadArgs;
@@ -5759,9 +6109,9 @@ declare module 'claude-code' {
    * name.
    */
   export type OpValueOf = {
-      'model.complete': string;
+      'model.complete': ModelCompleteResult;
       'model.classify': string | undefined;
-      'model.fork': ModelForkResult | null;
+      'model.fork': ModelForkResult;
       'audio.play': void;
       'audio.speak': SpeakResult;
       'mcp.call': McpToolResult;
@@ -5770,13 +6120,17 @@ declare module 'claude-code' {
       'session.model': string;
       'session.turns': number;
       'session.id': string;
-      'session.messages': SessionMessage[];
+      /**
+       * The conversation's messages, as rows or in Messages API form; `{ deny }`
+       * for an `agentId` the session cannot read.
+       */
+      'session.messages': SessionMessagesValue;
       'session.repo': SessionRepo | null;
       'session.surface': RenderSurface | null;
       'session.surfaces': readonly RenderSurface[];
       /**
-       * The credential handle, or null where the build or the provider has no
-       * first-party credential to hold.
+       * The credential handle, or null where the session holds no first-party
+       * credential (a third-party provider, a cloud gateway, no login or key).
        */
       'session.authorize': SessionAuthorization;
       'session.usage': SessionUsage;
@@ -5803,12 +6157,16 @@ declare module 'claude-code' {
       'ui.log': void;
       'ui.notice': void;
       'ui.invalidate': void;
-      'ui.open': void;
+      /**
+       * Whether a surface draws the pane now, or why it waits undrawn.
+       */
+      'ui.open': UiOpenResult;
       'ui.close': void;
       /**
        * The calling plugin's open panes, placed then unplaced, in open order.
        */
       'ui.panes': readonly UiPane[];
+      'ui.copy': UiCopyResult;
       'ui.blit': UiBlitResult;
       /**
        * The text; `{ base64 }` when asked for bytes.
@@ -5832,6 +6190,7 @@ declare module 'claude-code' {
       'clock.every': void;
       'http.fetch': HttpResponse;
       'process.run': ProcessRunResult;
+      'process.spawn': ProcessSpawnResult;
       'settings.read': Settings;
       'env.get': string | undefined;
       'env.set': void;
@@ -5916,7 +6275,9 @@ declare module 'claude-code' {
    *
    * An open answering the person's input (a command or prompt they entered, a
    * press) is placed at any width; one the plugin makes on its own waits
-   * undrawn below 144 terminal columns, 110 once they asked for that id.
+   * undrawn below 144 terminal columns, 110 once they asked for that id (in
+   * this session or an earlier one, until they close the pane by hand), and
+   * the call resolves `{ isPlaced: false, reason }` (UiOpenResult) saying so.
    */
   export type PaneOpenArgs = {
       /**
@@ -5948,13 +6309,11 @@ declare module 'claude-code' {
        * also closes it as the person's close does: `ui.close`, origin `person`.
        *
        * So does Escape at an idle, empty prompt once the prompt has the keys
-       * again (the person typed, or `focus` was refused); over text, a running
-       * turn, a dialog, a footer selection, a viewed agent's transcript or a
-       * prompt mode of its own the key stays theirs.
+       * again (the person typed, or `focus` was refused); over text, a turn, a
+       * dialog, a footer selection, a viewed agent or a prompt mode it is theirs.
        *
-       * A hook may refuse that close and keep it open. Left out, Escape returns
-       * the keys to the prompt and the pane stays. Each open sets it anew, as it
-       * sets the title.
+       * @remarks A hook may refuse that close and keep it open. Left out, Escape
+       *   returns the keys and the pane stays. Each open sets it anew, as a title.
        */
       closeOnEscape?: true;
       /**
@@ -6483,6 +6842,72 @@ declare module 'claude-code' {
        * limit.
        */
       stderr: string;
+  };
+
+  /**
+   * One piece of a spawned child's output as `$.process.spawn` streams it:
+   * which pipe it came from, and the text.
+   *
+   * The text is UTF-8 decoded as it arrived, in order per pipe: a piece ends
+   * wherever the child's write did, so a line may span two pieces and one
+   * piece may hold several lines; a multi-byte character is never split.
+   */
+  export type ProcessSpawnChunk = {
+      /**
+       * The pipe the text came from.
+       */
+      stream: 'stdout' | 'stderr';
+      /**
+       * What the child wrote, decoded; never empty. Left unread past about a
+       * megabyte, the child blocks on its next write until the loop pulls.
+       */
+      text: string;
+  };
+
+  /**
+   * The argument of `$.process.spawn(request)`, and the `e` its hooks see:
+   * the command by its argument vector and how the child is started.
+   *
+   * The same rules as `$.process.run`: no shell, the session's working
+   * directory unless one is named, the host's environment with `env` over it.
+   */
+  export type ProcessSpawnRequest = {
+      /**
+       * The command and its arguments, `argv[0]` the executable.
+       */
+      argv: readonly string[];
+      /**
+       * The child's working directory, relative to the session's or absolute;
+       * absent, the session's working directory.
+       */
+      cwd?: string;
+      /**
+       * Variables set over the host process's own environment.
+       */
+      env?: Record<string, string>;
+      /**
+       * Text written to the child's standard input, which is then closed;
+       * absent, standard input is closed from the start.
+       *
+       * A string today; a later form may take the text in pieces.
+       */
+      input?: string;
+  };
+
+  /**
+   * How a spawned child ended, as the stream of `$.process.spawn` returns it
+   * once every piece has been read: its exit code, or the signal that did it.
+   */
+  export type ProcessSpawnResult = {
+      /**
+       * The child's exit status; null when a signal ended it.
+       */
+      code: number | null;
+      /**
+       * What ended the child from outside (`SIGTERM`); null when it exited on
+       * its own. On Windows a killed child reads as an exit code, this null.
+       */
+      signal: string | null;
   };
 
   /**
@@ -8433,8 +8858,8 @@ declare module 'claude-code' {
   };
 
   /**
-   * A compaction that stands: the conversation as it reads afterwards, and
-   * the token counts the engine recorded when it was the one compacting.
+   * A compaction that stands: the conversation as it reads afterwards, and the
+   * counts and request usage the engine recorded when it was the one compacting.
    */
   export type SessionCompacted = {
       /**
@@ -8456,6 +8881,18 @@ declare module 'claude-code' {
        * did not record it.
        */
       tokensAfter?: number;
+      /**
+       * What the compaction's own model request cost (ModelUsage), when core
+       * made one: the summarizer's token counts as the API reported them.
+       *
+       * Absent when a hook answered in core's place, when core reused a summary
+       * already computed, and when the response reported none. Accounting only:
+       * the session's cost ledger (`session.measure`'s `cost`) already holds it.
+       *
+       * @example
+       * const { usage } = await next(e); if (usage) spent += usage.output_tokens
+       */
+      usage?: ModelUsage;
       skip?: undefined;
   };
 
@@ -8474,7 +8911,8 @@ declare module 'claude-code' {
        * transcript; absent for the main conversation (tool.call's `agentId`).
        *
        * Pinned: left out of a rewrite it is put back, changed it fails the hook.
-       * `$.session.messages()` is the main conversation whatever this names.
+       * `e.messages` is this loop's transcript; `$.session.messages()` stays the
+       * main conversation, and `$.session.messages({ agentId })` reads this one.
        */
       agentId?: string;
       /**
@@ -8496,7 +8934,7 @@ declare module 'claude-code' {
 
   /**
    * What a `session.compact` hook returns and what `next(e)` resolves to: the
-   * compaction (`{ messages, tokensBefore?, tokensAfter? }`) or `{ skip }`.
+   * compaction (`{ messages, tokensBefore?, tokensAfter?, usage? }`) or a skip.
    *
    * There is no summary string: the summary is a message.
    */
@@ -8601,9 +9039,12 @@ declare module 'claude-code' {
        */
       isAutoCompactEnabled: boolean;
       /**
-       * The last response's own token counts, or null before one came back.
+       * The token counts (ModelUsage) the live window's last API response
+       * reported, or null before one came back.
+       *
+       * The breakdown's `Messages` row is reconciled to it.
        */
-      apiUsage: ContextApiUsage | null;
+      apiUsage: ModelUsage | null;
   };
 
   /**
@@ -8707,14 +9148,19 @@ declare module 'claude-code' {
 
   /**
    * The input of `session.end`: the session is ending, why, and how to come back
-   * to it.
+   * to it; every field is the engine's: a hook observes, `next(e)` passes it on.
    *
-   * Every field is the engine's: a hook observes, and `next(e)` passes them on.
+   * One short wall-clock bound (1.5 s by default) covers every hook, its `$`
+   * waits and core, and `next.budget` reads it: at it `next.signal` aborts, a
+   * `$` call in flight with it; only a process a command let go of outlives it.
    */
   export type SessionEndInput = {
       /**
        * Why it ends (SessionEndReason), the word the classic SessionEnd hook
        * receives as its `reason`.
+       *
+       * `clear` is how a hook sees a `/clear`: the conversation ends, the process
+       * goes on under a new session id, and no `session.start` fires for it.
        */
       reason: SessionEndReason;
       /**
@@ -8822,6 +9268,123 @@ declare module 'claude-code' {
   };
 
   /**
+   * A `$.session.messages` call for the rows (SessionMessage) of the main
+   * conversation or of one agent's: `agentId` alone, no `as`.
+   */
+  type SessionMessagesAgentArgs = {
+      /**
+       * Whose conversation; absent, the main one.
+       */
+      agentId?: string;
+      /**
+       * Left out: the rows.
+       */
+      as?: undefined;
+  };
+
+  /**
+   * A `$.session.messages` call for the Messages API form (ApiMessage) of the
+   * main conversation or, with `agentId`, of one of this session's agents'.
+   */
+  type SessionMessagesApiArgs = {
+      /**
+       * `"api"`.
+       */
+      as: 'api';
+      /**
+       * Whose conversation; absent, the main one.
+       */
+      agentId?: string;
+  };
+
+  /**
+   * What `$.session.messages({ as: "api", agentId })` resolves to: the
+   * agent's conversation as ApiMessage, or `{ deny }` (SessionMessagesDeny).
+   *
+   * `Array.isArray` tells the two apart; without `agentId` it is always the
+   * messages.
+   */
+  type SessionMessagesApiResult = ApiMessage[] | SessionMessagesDeny;
+
+  /**
+   * What `$.session.messages(args)` takes and a `session.messages` hook reads
+   * on `e`: whose conversation (`agentId`) and in which form (`as`).
+   */
+  type SessionMessagesArgs = {
+      /**
+       * Whose conversation to read: the id `tool.call`, `turn.step` and
+       * `turn.complete` carry inside that agent's loop. Absent, the main one.
+       *
+       * A subagent (foreground or background), a fork, or a teammate running in
+       * this process; `$.agent.list()` lists it, an Agent tool use's `toolUses`
+       * entry names it. Not an agent a workflow run filed under the run.
+       */
+      agentId?: string;
+      /**
+       * `"api"` for the Messages API form (ApiMessage: `{ role, content }` with
+       * the content blocks intact); absent, the rows (SessionMessage).
+       */
+      as?: 'api';
+  };
+
+  /**
+   * `$.session.messages`: the main conversation's rows with no argument, with
+   * `{ as: "api" }` its Messages API form; with `agentId` an agent's, or deny.
+   */
+  type SessionMessagesCall = {
+      (): Promise<SessionMessage[]>;
+      (args: SessionMessagesMainApiArgs): Promise<ApiMessage[]>;
+      (args: SessionMessagesApiArgs): Promise<SessionMessagesApiResult>;
+      (args: SessionMessagesAgentArgs): Promise<SessionMessagesResult>;
+      (args: SessionMessagesArgs): Promise<SessionMessagesValue>;
+  };
+
+  /**
+   * What `$.session.messages({ agentId })` resolves to when the id names no
+   * conversation this session can read: why not, in `deny`.
+   *
+   * The id is not one of this session's agents, the agent runs in another
+   * process (a pane-hosted teammate), or it finished and the session reads no
+   * saved transcript back for it (none saved; a workflow run's). Never main.
+   */
+  type SessionMessagesDeny = {
+      /**
+       * Why no conversation was read, naming the id.
+       */
+      deny: string;
+  };
+
+  /**
+   * A `$.session.messages({ as: "api" })` call naming no agent: the main
+   * conversation, whose answer is always the messages (ApiMessage).
+   */
+  type SessionMessagesMainApiArgs = {
+      /**
+       * `"api"`.
+       */
+      as: 'api';
+      /**
+       * Left out: the main conversation.
+       */
+      agentId?: undefined;
+  };
+
+  /**
+   * What `$.session.messages({ agentId })` resolves to: the messages
+   * (SessionMessage), or `{ deny }` (SessionMessagesDeny).
+   *
+   * Without `agentId` it is always the messages; with one the session cannot
+   * read, the deny. `Array.isArray` tells the two apart.
+   */
+  type SessionMessagesResult = SessionMessage[] | SessionMessagesDeny;
+
+  /**
+   * What a `session.messages` hook's `{ value }` holds, for any call: the
+   * rows (SessionMessage), the Messages API form (ApiMessage), or `{ deny }`.
+   */
+  type SessionMessagesValue = SessionMessagesResult | SessionMessagesApiResult;
+
+  /**
    * One rate-limit window as the rate-limit notices read it.
    */
   export type SessionRateLimit = {
@@ -8868,8 +9431,8 @@ declare module 'claude-code' {
   };
 
   /**
-   * The input of `session.receive`: one inbound delivery (a relay's event, a
-   * peer's message, a Remote Control prompt), sanitized, before it is queued.
+   * The input of `session.receive`: one inbound delivery, sanitized, before it
+   * is queued (a relay's event, a peer's message, a message for an agent).
    */
   export type SessionReceiveInput = {
       /**
@@ -8891,6 +9454,18 @@ declare module 'claude-code' {
        * wake-shaped text stays `text`. Its `untrustedKeys` name third-party text.
        */
       event?: SessionReceiveEvent;
+      /**
+       * The id of the loop the delivery is for, when it is one of this session's
+       * agents (`$.agent.list()` lists it); absent for the main conversation's.
+       *
+       * Pinned: a rewrite that changes it is refused. An agent's message raises
+       * `session.send` with the sender's `agentId`, then this with the receiver's
+       * inside its turn, where a hook awaiting its own `$.prompt.submit` hangs.
+       *
+       * @example
+       * on("session.receive", { agentId: worker }, ($, e) => ({ consumed: "no" }))
+       */
+      agentId?: string;
   };
 
   /**
@@ -8899,14 +9474,57 @@ declare module 'claude-code' {
    */
   export type SessionReceiveOrigin = {
       /**
-       * `bridge` the user's own from a Remote Control client; `peer` another
-       * session; `unclassified` one the bridge could not place.
+       * `bridge` the user's own from a Remote Control client; `unclassified`
+       * one nobody could place; the rest as at `prompt.submit`.
        *
-       * `task-notification` a relay's event (a GitHub webhook) or a trigger;
-       * `scheduled-trigger` a routine; `peer-send-message` another session's
-       * SendMessage; `projects-relay` and `slack-ping` as at `prompt.submit`.
+       * `task-notification` a relay's event or a trigger.
        */
-      kind: 'bridge' | 'task-notification' | 'scheduled-trigger' | 'peer' | 'peer-send-message' | 'projects-relay' | 'slack-ping' | 'unclassified';
+      kind: 'bridge' | 'task-notification' | 'scheduled-trigger' | 'peer-send-message' | 'projects-relay' | 'slack-ping' | 'unclassified';
+  } | {
+      /**
+       * `peer` another session's or agent's model; `coordinator` the main
+       * conversation to an agent of its own.
+       */
+      kind: 'peer' | 'coordinator';
+      /**
+       * Which plugin's `$.session.send` composed it, AS THE SENDER SAYS;
+       * absent for a message the sending model wrote itself.
+       *
+       * A claim over a same-user channel, exactly as trustworthy as the
+       * sender's name: name it in a log line, never key a guard on it.
+       */
+      plugin?: string;
+  } | {
+      /**
+       * A delivery through this session's agent-team mailbox: `coordinator`
+       * from the lead's harness, `peer` from a teammate's or when unverified.
+       */
+      kind: 'peer' | 'coordinator';
+      /**
+       * Which plugin's `$.session.send` composed it, as the mailbox entry
+       * says; absent for a message the sending model wrote itself.
+       */
+      plugin?: string;
+      /**
+       * The sending member's name in the team (`team-lead` for the lead):
+       * the harness's stamp when `isVerified`, else whatever the writer put.
+       *
+       * @example
+       * on("session.receive", { origin: { teammate: "researcher" } }, hook)
+       */
+      teammate: string;
+      /**
+       * Whether this process's harness wrote the mailbox entry itself (an
+       * in-process teammate's or the lead's own send).
+       *
+       * `false`: read from the team's inbox file with nothing to check it
+       * against (a teammate in its own pane, the person editing the file, any
+       * same-user process); in an all-in-process team, one no member sent.
+       *
+       * @example
+       * on("session.receive", { origin: { isVerified: false } }, hook)
+       */
+      isVerified: boolean;
   };
 
   /**
@@ -8982,6 +9600,144 @@ declare module 'claude-code' {
       id: string;
   };
 
+  /**
+   * Whom `$.session.send` addresses: a recipient as the SendMessage tool
+   * names one (a string), or a session or an agent of this session by id.
+   *
+   * The engine spells the two id forms the tool's way before the send, and a
+   * `session.send` hook reads that spelling on `e.to`: `{ agentId }` as the
+   * id, `{ sessionId }` as the live local session's or remote one's address.
+   */
+  export type SessionSendAddress = string | {
+      /**
+       * One of the person's own sessions: what its `$.session.id()` answers
+       * on this machine, or a Remote Control or cloud id (`session_...`).
+       *
+       * A session that is not running now is not delivered to: the result
+       * says so.
+       */
+      sessionId: string;
+  } | {
+      /**
+       * A subagent or teammate of this session: the id `$.agent.list()`
+       * lists and `agent.spawn` answered.
+       *
+       * A finished subagent is resumed from its transcript with the message,
+       * as the tool does.
+       */
+      agentId: string;
+  };
+
+  /**
+   * `session.send`'s input as a plugin's `$.session.send(args)` takes it:
+   * `origin` (the calling plugin) and `agentId` are the engine's to set.
+   */
+  export type SessionSendArgs = {
+      /**
+       * The recipient: the tool's own spelling (a name, an agent id, a received
+       * `from` address), or `{ sessionId }` / `{ agentId }`.
+       */
+      to: SessionSendAddress;
+      /**
+       * The message's text, non-empty.
+       */
+      text: string;
+  };
+
+  /**
+   * The input of `session.send`: one plain-text message about to leave this
+   * conversation for another agent or session; the dual of `session.receive`.
+   */
+  export type SessionSendInput = {
+      /**
+       * Whom it goes to, as the SendMessage tool spells a recipient: a name as
+       * ListAgents lists it, an agent id, or a received `from` address.
+       *
+       * A plugin's `{ sessionId }` or `{ agentId }` arrives already spelled so.
+       * `next({ ...e, to })` readdresses it, judged again as the tool judges a
+       * send there; a name nobody carries is refused after the hooks.
+       */
+      to: string;
+      /**
+       * The message's text as the recipient will read it inside the engine's
+       * envelope; `next({ ...e, text })` is what is sent, with no new approval.
+       */
+      text: string;
+      /**
+       * Who is sending: the model through its SendMessage tool, or a plugin
+       * through `$.session.send`. Pinned: a rewrite that changes it is refused.
+       */
+      origin: SessionSendOrigin;
+      /**
+       * The id of the loop sending, when a subagent's or teammate's model sends
+       * (`$.agent.list()` lists it); absent for the main conversation's send.
+       *
+       * Pinned: the agent axis, not the origin. A message between two subagents
+       * carries the sender's id here and reaches the receiver's
+       * `session.receive` with that loop's own `agentId`.
+       */
+      agentId?: string;
+  };
+
+  /**
+   * Who is sending at `session.send`: the model through its SendMessage tool,
+   * or a plugin through `$.session.send`; stamped by the engine, pinned.
+   *
+   * The receiver's `session.receive` reads a plugin's name on its own
+   * `e.origin.plugin`, beside the `peer` or `coordinator` kind it keeps.
+   */
+  export type SessionSendOrigin = {
+      /**
+       * The model's own SendMessage tool call, in the main conversation or
+       * in a subagent's or teammate's loop (`e.agentId` says which).
+       */
+      kind: 'model';
+  } | {
+      /**
+       * A plugin's `$.session.send`, its `$.tool.call` of SendMessage, or the
+       * model inside an agent it spawned; its other hooks still see it.
+       */
+      kind: 'plugin';
+      /**
+       * The sending plugin's name, which the receiver reads as its
+       * `session.receive` origin's `plugin` and shows beside the sender.
+       */
+      name: string;
+  };
+
+  /**
+   * What a `session.send` hook returns and `next(e)` and `$.session.send`
+   * resolve to: whether the message was delivered, and why not when not.
+   *
+   * Delivered means queued at the recipient (an agent's inbox, another
+   * session's socket, the server for a remote session), never read: the
+   * receiver's turn is its own, and it may hold the message for its person.
+   *
+   * @example
+   * const { isDelivered, reason } = await $.session.send({ to, text })
+   */
+  export type SessionSendResult = {
+      /**
+       * True: the message reached its recipient's queue or inbox.
+       */
+      isDelivered: true;
+      reason?: undefined;
+  } | {
+      /**
+       * False: nothing was delivered. A hook answering this without `next`
+       * refuses the send, and the model reads `reason` as the tool's result.
+       */
+      isDelivered: false;
+      /**
+       * Why not, as the SendMessage tool words it: nobody by that name,
+       * several by it, the recipient gone or refusing, or a hook's refusal.
+       *
+       * @example
+       * on('session.send', { to: 'prod' }, () => NOT_FROM_HERE)
+       */
+      reason: string;
+  };
+
   type SessionStartHookInput = BaseHookInput & {
       hook_event_name: 'SessionStart';
       source: 'startup' | 'resume' | 'clear' | 'compact' | 'fork';
@@ -9036,13 +9792,26 @@ declare module 'claude-code' {
   };
 
   /**
-   * What `$.session.usage()` answers: the context window's fill, the account's
-   * rate-limit windows and the session's cost, as the status line has them.
+   * What `$.session.usage()` answers: when the session began, the context
+   * window's fill, the account's rate-limit windows and the session's cost.
    *
-   * A figure the engine does not have is left out, never zeroed: `rateLimits`
-   * is empty off a subscription, `cost` absent where the host keeps no ledger.
+   * The status line's figures. One the engine does not have is left out, never
+   * zeroed: `rateLimits` is empty off a subscription, `cost` absent where the
+   * host keeps no ledger.
    */
   export type SessionUsage = {
+      /**
+       * When the session these figures count from began, in `$.clock.now()`'s
+       * milliseconds: its launch, or for a resumed session its first launch.
+       *
+       * So what happened while a resumed or continued session was away still
+       * counts as its own; `/clear` starts it over at that moment. The line the
+       * engine's diff panel draws between this session's edits and earlier ones.
+       *
+       * @example
+       * const isOlder = stat.mtimeMs < (await $.session.usage()).startedAt
+       */
+      startedAt: number;
       /**
        * The live context window: the status line's `context_window` figures.
        */
@@ -9298,24 +10067,26 @@ declare module 'claude-code' {
    * The events that stream: their hooks are async generators, `next(e)` is
    * the stream of everything beneath, and the result is what it returns.
    *
-   * `turn.step` alone: the model's response arrives in pieces, and a hook
-   * that saw it whole could not change what had already been shown.
+   * Two events stream: `turn.step`, the model's response arriving in pieces,
+   * where a hook that saw it whole could not change what had already been
+   * shown; and `process.spawn`, a call on `$` whose child's output arrives in
+   * pieces for as long as the child runs.
    */
-  export type StreamingEventName = 'turn.step';
+  export type StreamingEventName = 'turn.step' | 'process.spawn';
 
   /**
    * The rest of the chain as a hook on a streaming event receives it: Next,
    * except that `next(e)` is the stream beneath (HookStream), not a promise.
    *
-   * Each call opens a fresh stream; for `turn.step` each is a model request,
-   * so a hook that calls it twice makes two. Not calling it yields the hook's
-   * own chunks and returns its own result, and nothing beneath runs.
+   * Each call opens a fresh stream (for `turn.step` a model request, for
+   * `process.spawn` a child), so a hook that calls it twice makes two. Not
+   * calling it yields the hook's own chunks and result; nothing beneath runs.
    *
    * @template S what `next.is(pattern, e)` narrows `e` to, as Next's
    * @see HookBudget `ms`: the hook's budget counts its own code, never a wait
    * at a `yield` or on this stream, however long the response beneath takes
    */
-  export type StreamNext<N extends StreamingEventName = StreamingEventName, E = Args<N>, O = NextResult<N>, S extends {
+  export type StreamNext<N extends StreamingEventName = StreamingEventName, E = Args<N>, O = EventResult<N>, S extends {
       [K in N]?: unknown;
   } = {
       [K in N]: Args<K>;
@@ -9628,7 +10399,8 @@ declare module 'claude-code' {
    * resolve to: the tool's result (`{ result, context? }`) or `{ deny }`.
    *
    * From core the result is `{ ref, result, text }` or, when the tool reported
-   * an error, `{ ref, result, text, isError }`; `ref` names core's messages.
+   * an error, `{ ref, result, text, isError }`, either with `isReadOnly` when
+   * the tool held the input it ran read-only; `ref` names core's messages.
    *
    * @template Name the tool the call went to, typing `result` per built-in
    *   tool (BuiltinToolResults) once `e.tool` is narrowed; else `unknown`
@@ -9644,6 +10416,7 @@ declare module 'claude-code' {
       ref?: undefined;
       text?: undefined;
       isError?: undefined;
+      isReadOnly?: undefined;
   } | {
       /**
        * The tool's output: from core the tool's record, typed per built-in
@@ -9678,6 +10451,15 @@ declare module 'claude-code' {
        * Absent on a hook's own `{ result }`.
        */
       text?: string;
+      /**
+       * Set by core, present only when the tool held the input it executed
+       * read-only by its own check (the one its permissions use).
+       *
+       * It speaks for this call as run, rewrites included, not for calls it
+       * causes (a subagent's tools raise their own `tool.call`); for an MCP
+       * tool, its server's declaration. Bash `ls`: set; a hook's own: never.
+       */
+      isReadOnly?: true;
       isError?: undefined;
       deny?: undefined;
   } | {
@@ -9703,6 +10485,10 @@ declare module 'claude-code' {
        * As on an answered result.
        */
       context?: readonly string[];
+      /**
+       * As on an answered result: the tool held the input it ran read-only.
+       */
+      isReadOnly?: true;
       deny?: undefined;
   };
 
@@ -9950,8 +10736,8 @@ declare module 'claude-code' {
        * one (`tool.call`'s `result`), the error text when `isError`.
        *
        * Absent when nothing was stored. Headless (`-p`), a tool may store the
-       * record less its bulk (Bash blanks `stdout`); `text` is what the model
-       * read either way.
+       * record less its bulk (Bash blanks `stdout`), and a subagent's transcript
+       * stores none; `text` is what the model read either way.
        */
       result?: unknown;
   };
@@ -10000,8 +10786,8 @@ declare module 'claude-code' {
        * one (`tool.call`'s `result`), the error text on a refused or errored one.
        *
        * Absent while the call is in flight or when nothing was stored. Headless
-       * (`-p`), a tool may store the record less its bulk (Bash blanks `stdout`);
-       * `text` holds either way.
+       * (`-p`), a tool may store the record less its bulk (Bash blanks `stdout`)
+       * and a subagent's transcript stores none; `text` holds either way.
        */
       result?: unknown;
       /**
@@ -10012,6 +10798,25 @@ declare module 'claude-code' {
        * Present only when the tool reported an error, as on `tool.call`'s result.
        */
       isError?: true;
+      /**
+       * On an Agent tool use, the id of the agent it spawned: what
+       * `$.session.messages({ agentId })` reads and its `turn.complete` carries.
+       *
+       * Known while the session tracks the run and once the call is answered
+       * (from what it stored). Absent on every other tool, and on an Agent call
+       * the session refused before an agent started.
+       *
+       * @example
+       * if (use.agentId) child = await $.session.messages({ agentId: use.agentId })
+       */
+      agentId?: string;
+      /**
+       * On an answered Agent tool use that ran to completion, how long the agent
+       * ran, in milliseconds, as the call's stored record has it.
+       *
+       * Absent while it runs, on a background launch, and on every other tool.
+       */
+      durationMs?: number;
   };
 
   /**
@@ -10225,7 +11030,8 @@ declare module 'claude-code' {
    * the engine is about to send it; the bottom of the chain sends it.
    *
    * The transcript is not on it: `messageCount` says how many messages the
-   * request carries, and `$.session.messages()` reads them. A hook rewrites
+   * request carries, and `$.session.messages()` reads them (in a subagent's
+   * loop, `$.session.messages({ agentId: e.agentId })`). A hook rewrites
    * `model` or `effort` going down; the rest is pinned.
    */
   export type TurnStepInput = {
@@ -10401,11 +11207,11 @@ declare module 'claude-code' {
 
   /**
    * What a model turn, or one response inside it, cost as the API reported it:
-   * the four token counts (`$.model.fork`'s usage shape) and the model's id.
+   * the four token counts (ModelUsage) and the model's id.
    *
    * A turn's counts are its responses' summed; its model is the last response's.
    */
-  export type TurnUsage = ModelForkUsage & {
+  export type TurnUsage = ModelUsage & {
       /**
        * Which model answered, by the id the API reports.
        */
@@ -10438,6 +11244,67 @@ declare module 'claude-code' {
   };
 
   /**
+   * The argument of `$.ui.copy` and the input of `ui.copy`: the text, and
+   * which surface's clipboard takes it, the caller's choice.
+   *
+   * A hook above the caller reads the same two fields: it may rewrite either
+   * with `next`, refuse the copy with `{ deny }`, or answer `{ value }` itself
+   * (a plugin whose `Client` runs on a remote surface can take copies for it).
+   */
+  export type UiCopyArgs = {
+      /**
+       * What the person pastes afterwards, verbatim: any string, newlines and
+       * all; never shown on screen by the copy itself.
+       */
+      text: string;
+      /**
+       * Which surface to copy on; the caller's choice, one the session draws on:
+       * a press, field or message hook passes `e.surface`.
+       *
+       * Left out: the first of `$.session.surfaces()`, so a hook on `ui.copy`
+       * reads the target either way and a matcher narrows on it
+       * (`on("ui.copy", { surface: "desktop" }, ...)`); absent: nothing draws.
+       */
+      surface?: RenderSurface;
+  };
+
+  /**
+   * What `$.ui.copy` resolves to and what a `ui.copy` hook's `{ value }`
+   * holds: whether the text reached a clipboard (`isCopied`), else why not.
+   *
+   * @example
+   * if (!(await $.ui.copy({ text, surface: e.surface })).isCopied) warn()
+   */
+  export type UiCopyResult = {
+      /**
+       * True: the surface took the text; on the terminal, the machine's
+       * clipboard tool where one runs, else the OSC 52 sequence written out.
+       *
+       * OSC 52 does not report back: a terminal that drops it, with no tool
+       * on the machine (pbcopy, wl-copy, xclip, PowerShell, tmux's buffer),
+       * still reads true.
+       */
+      isCopied: true;
+  } | {
+      /**
+       * False: nothing was copied.
+       */
+      isCopied: false;
+      /**
+       * Why not, a closed set: `no-surface`, `no-clipboard` or `refused`; a
+       * hook above answering without copying says `refused`.
+       *
+       * `no-surface`: nothing draws (a `-p` run, the SDK), or the named
+       * surface is not attached. `no-clipboard`: it draws but the engine
+       * cannot write its clipboard (a remote surface; OSC 52 past its bound).
+       *
+       * @example
+       * on('ui.copy', { surface: 'mobile' }, () => ({ value: REFUSED }))
+       */
+      reason: 'no-surface' | 'no-clipboard' | 'refused';
+  };
+
+  /**
    * What a plugin's `$.ui.focus(args)` takes: one of its own elements, by the
    * `key` it drew it under, in one of its sites that holds the keyboard now.
    *
@@ -10454,6 +11321,10 @@ declare module 'claude-code' {
       /**
        * The element's `key`: a `Button`, `Input` or `Select` this plugin drew in
        * that site; of several under one key, the first in document order.
+       *
+       * One the site's next drawing brings is waited for, bounded, except from
+       * inside that drawing's own hook, which cannot wait on itself; one it
+       * never draws is `{ deny }` once the wait is over.
        */
       key: string;
   };
@@ -10679,6 +11550,51 @@ declare module 'claude-code' {
   };
 
   /**
+   * What `$.ui.open` resolves to and what a `ui.open` hook's `{ value }` holds.
+   *
+   * Whether a surface draws the pane now, in `$.ui.panes()`' word
+   * (`isPlaced`).
+   *
+   * Asked (the hook of a command the person typed or a prompt they entered, a
+   * Button, Input or Select they worked; never a timer, `session.start`, a
+   * queued prompt, nor `focus`) a pane is placed at any width: docked beside a
+   * fullscreen transcript from 110 columns, else inline above the prompt.
+   * Unasked it is placed from 144 terminal columns (110 for an id the person
+   * opened from this plugin before, in this session or an earlier one, and
+   * has not closed by hand since) and waits undrawn below that, no
+   * `ui.render` raised, until the person opens it or the terminal widens to
+   * the floor. Where a surface seated it (`dock`, `inline`) is on the `Pane`
+   * render props, per surface; a plugin's tests answer with a hook beneath.
+   *
+   * @example
+   * const opened = await $.ui.open({ id: "clock" })
+   */
+  export type UiOpenResult = {
+      /**
+       * True: the pane is open and drawn (or retitled in place); the first
+       * `ui.render` for `{ component: "Pane", requestId: id }` follows.
+       */
+      isPlaced: true;
+  } | {
+      /**
+       * False: the pane is open but waits undrawn, opened unasked on a
+       * terminal narrower than an unrequested pane is given.
+       */
+      isPlaced: false;
+      /**
+       * Why it waits and what seats it: the floor it fell under (144 columns
+       * unasked, 110 for an id the person once opened) and the width now.
+       *
+       * With no terminal measured (a `-p` run) nothing is squeezed, so this
+       * arm never comes back there.
+       *
+       * @example
+       * on('ui.open', { id }, () => ({ value: { isPlaced: false, reason } }))
+       */
+      reason: string;
+  };
+
+  /**
    * One of this plugin's open panes as `$.ui.panes()` lists it: the pane's
    * id and title, and where it stands with the person right now.
    *
@@ -10705,7 +11621,10 @@ declare module 'claude-code' {
       isFocused: boolean;
       /**
        * False while it waits undrawn: opened unasked on a terminal too narrow
-       * for an unrequested pane, until an open the width or the person admits.
+       * for an unrequested pane, its `$.ui.open` answered `{ isPlaced: false }`.
+       *
+       * It turns true when the person opens the pane or the terminal is widened
+       * to its floor (UiOpenResult `reason`).
        */
       isPlaced: boolean;
   };
@@ -11257,6 +12176,9 @@ declare module 'claude-code' {
 declare module 'claude-code/testing' {
   import type { Args } from 'claude-code';
   import type { Chunk } from 'claude-code';
+  import type { ClassicEventName } from 'claude-code';
+  import type { ClassicEventOf } from 'claude-code';
+  import type { ClassicResultOf } from 'claude-code';
   import type { ClientKeyEvent } from 'claude-code';
   import type { ClientPointerEvent } from 'claude-code';
   import type { Elements } from 'claude-code';
@@ -11295,6 +12217,22 @@ declare module 'claude-code/testing' {
   export type AsyncMatchers = {
       [K in keyof Matchers]: (...args: Parameters<Matchers[K]>) => Promise<void>;
   };
+
+  /**
+   * A classic hook event the engine raises on its own, by its own name
+   * (`SessionStart`, `Stop`): all but `PreToolUse`, which rides `tool.call`.
+   */
+  export type ClassicEvent = Exclude<ClassicEventName, 'classic.PreToolUse'> extends `classic.${infer E}` ? E : never;
+
+  /**
+   * What `$.classic.<Event>` takes: the event's own fields as its hook sees
+   * them on `e`, less what the engine stamps at every call site.
+   *
+   * `hook_event_name` is the call's; `session_id`, `transcript_path` and
+   * `cwd` are the session's unless the test gives them (the test session's
+   * id, `''` for no local transcript, the plugin's folder).
+   */
+  export type ClassicFields<E extends ClassicEvent> = Omit<ClassicEventOf[`classic.${E}`], 'hook_event_name' | 'session_id' | 'transcript_path' | 'cwd'> & Partial<Pick<ClassicEventOf[`classic.${E}`], 'session_id' | 'transcript_path' | 'cwd'>>;
 
   /**
    * Which `Client` of a mounted drawing an act or a read means, by the `key`
@@ -11362,12 +12300,14 @@ declare module 'claude-code/testing' {
    * What a test holds as `$`, the engine's own: every call on it is made as
    * the REPL, the query loop and the render sites make theirs, over every plugin.
    *
-   * `next.origin` is the engine, and the whole chain runs over the plugins
-   * loaded. A tool call's `tool_use_id` is minted when left out; `$.ui.mount`
-   * is a surface the test names drawing an instance, `$.ui.press` a press on it.
+   * `next.origin` is the engine, the chain every plugin loaded. `$.ui.mount`
+   * is a surface drawing an instance; `press`, `input` and `select` a person
+   * acting on an element the test drew; `$.classic` the classic hook events.
    */
   export type Engine = {
-      [N in keyof EventCalls]: N extends 'ui' ? EngineNoun<N> & EnginePress & EngineMount : EngineNoun<N>;
+      [N in keyof EventCalls]: N extends 'ui' ? EngineNoun<N> & EnginePress & EngineInput & EngineSelect & EngineMount : EngineNoun<N>;
+  } & {
+      classic: EngineClassic;
   };
 
   /**
@@ -11375,6 +12315,44 @@ declare module 'claude-code/testing' {
    * site passes it, to its result, or for a streaming event to its stream.
    */
   export type EngineCall<E extends EventName> = E extends StreamingEventName ? (e: Args<E>) => HookStream<Chunk<E>, ResultOf[E]> : (e: Args<E>) => Promise<ResultOf[E]>;
+
+  /**
+   * The classic (settings) hook events as the engine raises them: each a call
+   * running the `classic.<Event>` chain over every plugin hooked on it.
+   *
+   * No settings hook runs beneath, so the test's `on('classic.<Event>')` is the
+   * bottom; the envelope (`hook_event_name`, `session_id`, `transcript_path`,
+   * `cwd`) is stamped unless given. `PreToolUse` rides `$.tool.call` instead.
+   *
+   * @example
+   * await $.classic.SessionStart({ source: 'clear' })
+   */
+  export type EngineClassic = {
+      [E in ClassicEvent]: (e: ClassicFields<E>) => Promise<ClassicResultOf[`classic.${E}`]>;
+  };
+
+  /**
+   * A surface typing into an Input a test rendered: the `ui.input` chain over
+   * every plugin hooked on it, the Input's own handler last.
+   */
+  export type EngineInput = {
+      /**
+       * Types into the Input, as an edit (`kind` `change`, reaching `onInput`) or
+       * Enter (`submit`, the default, reaching `onSubmit`) with that text.
+       *
+       * Resolves once the chain, the handler and the work it started settled.
+       * `e.surface` is the surface of the drawing that holds it.
+       *
+       * @param target whose Input, its key, the text, the kind, and the instance
+       *               and surface when several hold it
+       * @returns what the chain settled on; rejects when no such Input is drawn, or
+       *          several are and neither instance nor surface tells them apart
+       * @example
+       * await $.ui.input({ plugin: 'notes', key: 'q', text: 'g', kind: 'change' })
+       * await $.ui.input({ plugin: 'notes', key: 'q', text: 'groceries' })
+       */
+      input: (target: InputTarget) => Promise<UiInputResult | undefined>;
+  };
 
   /**
    * A surface drawing a component instance through the plugins, then driven
@@ -11427,7 +12405,9 @@ declare module 'claude-code/testing' {
        * Presses the Button, as a click or its hotkey does; with `link`, the
        * Markdown's link, as a click on it does.
        *
-       * `e.surface` is the surface of the drawing that holds it.
+       * Resolves once the chain, `onPress` and any work `onPress` left running
+       * unawaited have settled (work asleep on `mock.clock` waits for the test
+       * to advance it). `e.surface` is the surface of the drawing that holds it.
        *
        * @param target whose element, its key, the instance and surface when
        *   several hold it, and for a Markdown the link
@@ -11435,6 +12415,27 @@ declare module 'claude-code/testing' {
        *   drawn, or several are and neither instance nor surface tells them apart
        */
       press: (target: PressTarget) => Promise<UiPressResult | undefined>;
+  };
+
+  /**
+   * A surface picking an option of a Select a test rendered: the `ui.select`
+   * chain over every plugin hooked on it, the Select's own `onSelect` last.
+   */
+  export type EngineSelect = {
+      /**
+       * Picks the option, as choosing it on the surface does; resolves once the
+       * chain, `onSelect` and the work it started have settled.
+       *
+       * `e.surface` is the surface of the drawing that holds it.
+       *
+       * @param target whose Select, its key, the option's value, and the
+       *   instance and surface when several hold it
+       * @returns what the chain settled on; rejects when no such Select is
+       *   drawn, or several are and neither instance nor surface tells them apart
+       * @example
+       * await $.ui.select({ plugin: 'notes', key: 'sort', value: 'date' })
+       */
+      select: (target: SelectTarget) => Promise<UiSelectResult | undefined>;
   };
 
   /**
@@ -11505,6 +12506,35 @@ declare module 'claude-code/testing' {
        * Its children as drawn: strings and element descriptions.
        */
       children: unknown[];
+  };
+
+  /**
+   * What `$.ui.input` takes: the plugin whose hook drew the Input, its `key`,
+   * the field's text, which input it is, instance and surface when several.
+   */
+  export type InputTarget = {
+      plugin: string;
+      key: string;
+      /**
+       * The field's whole text at that moment: `e.value` for the chain.
+       */
+      text: string;
+      /**
+       * `submit` (the default) is Enter with that text and reaches `onSubmit`;
+       * `change` is one edit left in the field and reaches `onInput`.
+       *
+       * A person typing is a run of `change`s, then a `submit`.
+       */
+      kind?: UiInputArgument['kind'];
+      /**
+       * Which instance holds it, when the plugin drew the key in several.
+       */
+      requestId?: string;
+      /**
+       * Which surface's drawing, when the key is drawn on more than one; the
+       * input carries the surface of the drawing it lands in either way.
+       */
+      surface?: RenderSurface;
   };
 
   /**
@@ -11812,9 +12842,9 @@ declare module 'claude-code/testing' {
    * Every member a mounted drawing of component `C` can have; `Mounted<P, C>`
    * keeps the ones surface `P` has the element for (ElementOfAct).
    *
-   * Each act resolves once the loop settled and what a plugin invalidated
-   * was drawn again. The kit exercises the mod (its hooks, its description
-   * under the surface's rules, its `Client` modules), never a surface's paint.
+   * Each act resolves once the work it started settled (chain, handler, what
+   * the handler left running) and what a plugin invalidated was drawn again.
+   * The kit exercises the mod's hooks and modules, never a surface's paint.
    */
   export type MountedMembers<P extends RenderSurface, C extends RenderComponent = RenderComponent> = {
       /**
@@ -12116,6 +13146,28 @@ declare module 'claude-code/testing' {
        * For a Markdown answering its links: which of them the press lands on.
        */
       link?: PressedLink;
+  };
+
+  /**
+   * What `$.ui.select` takes: the plugin whose hook drew the Select, its
+   * `key`, the picked option's value, instance and surface when several.
+   */
+  export type SelectTarget = {
+      plugin: string;
+      key: string;
+      /**
+       * Which option is picked, by the `value` the Select listed it under.
+       */
+      value: string;
+      /**
+       * Which instance holds it, when the plugin drew the key in several.
+       */
+      requestId?: string;
+      /**
+       * Which surface's drawing, when the key is drawn on more than one; the
+       * pick carries the surface of the drawing it lands in either way.
+       */
+      surface?: RenderSurface;
   };
 
   /**
