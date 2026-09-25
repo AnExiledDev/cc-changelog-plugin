@@ -1,13 +1,16 @@
-// Written by Claude Code 2.1.282.
+// Written by Claude Code 2.1.283.
 // Claude Code function hooks: the plugin API's TypeScript declarations.
 //
 // EARLY ACCESS: this surface may change between releases without notice.
-// Written by `/plugin-types`; regenerate with that command after an update
-// rather than editing. The first line names the Claude Code version that
-// wrote it. TypeScript 5.4 or newer reads it. `claude plugin validate <dir>`
-// is the other half: it reads a plugin's manifest and its hooks module's
-// source the way the engine will and reports what the module hooks and
-// calls and everything the engine would refuse, before any session loads it.
+// Written by the engine each time it loads a mod from a folder the person
+// owns, beside that mod as .claude-plugin/types/claude-code/index.d.ts, and
+// by `/plugin-types` into a directory the person names; written again
+// after an update rather than edited. The first line names the Claude Code
+// version that wrote it. TypeScript 5.4 or newer reads it.
+// `claude plugin validate <dir>` is the other half: it reads a plugin's
+// manifest and its hooks module's source the way the engine will and
+// reports what the module hooks and calls and everything the engine would
+// refuse, before any session loads it.
 //
 // What is here: the module a hooks module may import types from,
 //   import type { Register, On, EngineInterface } from 'claude-code'
@@ -78,7 +81,11 @@
 // you depend on is typed with nothing copied (the include above takes the
 // whole folder). "hooks" is the plugin's hooks/ folder and "tests" its test
 // files. `lib` names no DOM: the environment has none, and its `Text`
-// would shadow the element.
+// would shadow the element. A mod the engine loads from a folder the person
+// owns has these options without writing them: its tsconfig.json extends
+// .claude-plugin/types/tsconfig.json, which carries them with that folder
+// as the one type root, holding this file and one entry per plugin the
+// mod's plugin.json lists under "dependencies" (that plugin's own contract).
 //
 // A plugin that adds a noun to `$` ships its own contract: a .d.ts its
 // plugin.json names as "types", exporting the noun's types at its top level
@@ -941,6 +948,16 @@ declare module 'claude-code' {
        * @example <Button variant="primary" onPress={save}>Save</Button>
        */
       variant?: 'primary' | 'secondary';
+      /**
+       * Marks the Button that closes its site: a drawing hint only. `onPress`
+       * still does the dismissing and the press is raised as for any Button.
+       *
+       * The terminal draws it as without the prop; a desktop draws its native
+       * close control at the site's trailing edge, the label its accessible name.
+       *
+       * @example <Button role="dismiss" onPress={close}>Dismiss</Button>
+       */
+      role?: 'dismiss';
       /**
        * The site's focus ring starts here when the site takes the keyboard,
        * instead of on nothing, as the DOM's `autofocus`: Enter acts on it at once.
@@ -8079,6 +8096,15 @@ declare module 'claude-code' {
            */
           variant?: ButtonProps['variant'];
           /**
+           * `"dismiss"` marks the Button that closes its site, a drawing hint
+           * only: the terminal draws it as without, a desktop its close control.
+           *
+           * Carried to every surface as written, never filled in.
+           *
+           * @example { key: 'dismiss', label: 'Dismiss', role: 'dismiss' }
+           */
+          role?: ButtonProps['role'];
+          /**
            * The site's ring starts on this element when the site takes the
            * keyboard; the first drawn of several. Absent draws as before.
            */
@@ -8708,17 +8734,20 @@ declare module 'claude-code' {
       };
       /**
        * The line that animates while a turn runs (`Sauteing... (12s, 300
-       * tokens)`); a remote surface draws its own.
+       * tokens)`); on the desktop, the row that carries the turn's mark.
        *
-       * The row reads `word` (or `message` while one overrides it), then
-       * `suffix`, then the dim parenthetical the engine keeps (elapsed time,
-       * tokens, effort); a hook rewrites the first three or draws its own tree.
+       * Reads `word` (or `message` while one overrides it), `suffix`, then what
+       * the surface keeps and no prop carries: elapsed time, tokens, effort. A
+       * hook rewrites the first three, or draws a tree in place of all of it.
        *
-       * Raised on the terminal surface only.
+       * Raised on the terminal and desktop surfaces only.
        */
       Spinner: {
           /**
            * Animated by the line (`Sauteing`), as sampled for this turn.
+           *
+           * On the desktop, what the row says its step is doing (`Creating
+           * notes.md`), or `Working` while the row shows no words.
            */
           word: string;
           /**
@@ -8735,7 +8764,8 @@ declare module 'claude-code' {
            */
           suffix: string;
           /**
-           * What the turn is doing.
+           * What the turn is doing. The desktop tells `thinking`, `requesting`,
+           * `tool-use` and `responding` apart and never says `tool-input`.
            */
           mode: 'requesting' | 'responding' | 'thinking' | 'tool-input' | 'tool-use';
       };
@@ -11413,11 +11443,11 @@ declare module 'claude-code' {
        */
       agentId?: string;
       /**
-       * What the turn cost: its responses' token counts summed and the model of
-       * the last, read off the API responses the engine already holds.
+       * What the turn cost: its real requests' token counts, plus what a made-up
+       * response's stop stated, summed, and the model of the last that counted.
        *
-       * A response a `turn.step` hook made up counts only when its stop states
-       * usage; absent when no counted response came (an interrupt, an API error).
+       * A response a `turn.step` hook made up adds nothing unless its stop states
+       * usage; absent when nothing counted (an interrupt, an API error).
        */
       usage?: TurnUsage;
   };
