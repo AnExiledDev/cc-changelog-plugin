@@ -93,11 +93,20 @@ const ANCHOR = /^[a-z0-9][a-z0-9-]{0,79}$/;
  * megabyte, which is exactly what a tool answer must never be, so nothing
  * here fetches it; an event's payload and result types arrive inlined under
  * the event, which is the one question the index rows could not answer.
+ *
+ * `changes` is the third route: what moved in the surface release by release,
+ * diffed from one build's declarations to the next. Without a `version` it is
+ * the list of releases with their counts; with one it is that release's items,
+ * and a `version` alone implies `changes`, as the site's planner reads it.
  */
 const modsApiTool = async ($, e) => {
     const base = await baseUrl($);
     const page = text(e.page)?.toLowerCase();
     const anchor = text(e.anchor);
+
+    if (e.changes === true || text(e.version) !== undefined) {
+        return modsApiChanges($, base, e);
+    }
 
     if (page !== undefined && MODS_PAGES.includes(page) !== true) {
         return { error: `\`${page}\` is not a Mods API page.`, allowed: MODS_PAGES };
@@ -124,6 +133,26 @@ const modsApiTool = async ($, e) => {
             offset: bounded(e.offset, 0, 0, MAX_OFFSET),
         })}`,
     );
+};
+
+const modsApiChanges = async ($, base, e) => {
+    const version = text(e.version);
+
+    if (version === undefined) {
+        return fetched(
+            $,
+            `${base}/reference/mods/api/changes.json?${query({
+                limit: bounded(e.limit, 25, 1, MODS_LIMIT),
+                offset: bounded(e.offset, 0, 0, MAX_OFFSET),
+            })}`,
+        );
+    }
+
+    if (VERSION.test(version) !== true) {
+        return { error: `\`${version}\` is not a release; they read like \`2.1.283\`.` };
+    }
+
+    return fetched($, `${base}/reference/mods/api/changes.json?${query({ version })}`);
 };
 
 /**
@@ -2317,6 +2346,9 @@ const TOOLS = [
             "be returned inlined under it; every answer names the other `types` it mentions, with " +
             "their anchors, so a shape is one call away. This is the surface the `reference` " +
             "tool's `hook` family only names and the `docs` corpus does not describe at all. " +
+            "Pass `changes: true` for how the surface moved between releases (added, removed, " +
+            "changed and docs-only symbols, with before/after shapes), and a `version` with it " +
+            "for one release's items. " +
             "For what any of it means rather than what it is called, use `mods`: this answers " +
             "signatures, and that answers how a module is written.",
         inputSchema: {
@@ -2338,7 +2370,17 @@ const TOOLS = [
                     type: "string",
                     description: "One symbol's `anchor`, as answered by a search. Needs `page` with it.",
                 },
-                limit: { type: "number", description: "At most this many symbols (1-100, default 25)." },
+                changes: {
+                    type: "boolean",
+                    description:
+                        "Answer how the surface changed release by release instead of the surface " +
+                        "itself: newest first, with counts. `q`, `page` and `anchor` are ignored.",
+                },
+                version: {
+                    type: "string",
+                    description: "One release's changes in full, as `2.1.283`. Implies `changes`.",
+                },
+                limit: { type: "number", description: "At most this many symbols, or releases with `changes` (1-100, default 25)." },
                 ...PAGING,
             },
         },

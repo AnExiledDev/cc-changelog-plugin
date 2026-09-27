@@ -166,6 +166,7 @@ refused, including a tree that did not validate.
   a plugin could read rate-limit windows and per-response token usage and
   none of the nine could say: `reference` names the `hook` family and
   `docs` does not describe this API at all.
+- **`modsapi` also answers what moved.** Added 2026-09-27. With `changes: true` it reads the site's release-by-release diff of the same surface, published at `/reference/mods/api/changes`: every release newest first with how many symbols were added, removed, changed or only re-documented, and with a `version` that release's items, each carrying its before and after shape. A module written against last month's build can check what broke without diffing two declaration files by hand.
 - **`mods`, the other half of `modsapi`: how to actually write one.** Added
   2026-09-20. `modsapi` answers what a symbol is called and what it takes;
   the site's Mods guide is ten hand-written pages on what any of it means, and
