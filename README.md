@@ -22,6 +22,8 @@ running build - 518 KB of declarations, every event's input and result, every
 method on `$`, every element's props. `types/claude-code.d.ts` here is the copy
 v2.1.283 wrote. **It is the authority; the notes below are the map to it.**
 
+The site it reads is [changelogs.core-directive.com](https://changelogs.core-directive.com).
+
 ## Provenance
 
 Operator, 2026-09-09 (op:2026-09-09-2117-e2bd):
