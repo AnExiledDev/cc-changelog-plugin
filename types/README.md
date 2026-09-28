@@ -3,19 +3,19 @@
 
 # claude-code.d.ts
 
-518 KB of TypeScript declarations for Claude Code's function-hooks plugin
+531 KB of TypeScript declarations for Claude Code's function-hooks plugin
 runtime: every event's input and result, every noun and method on `$`, every
 element each surface draws and the props it takes.
 
 ## Where it came from
 
 Nobody wrote it. Claude Code writes it, from the build you are running, when
-you type `/plugin-types` in a session. The copy here is what build **2.1.283**
-ships, read out of its binary on 2026-09-25 (the same text the command
+you type `/plugin-types` in a session. The copy here is what build **2.1.284**
+ships, read out of its binary on 2026-09-28 (the same text the command
 writes, with the version line the command adds), and its own header says the
 rest:
 
-> Written by Claude Code 2.1.283.
+> Written by Claude Code 2.1.284.
 > EARLY ACCESS: this surface may change between releases without notice.
 > Written by `/plugin-types`; regenerate with that command after an update
 > rather than editing. The first line names the Claude Code version that
