@@ -1,4 +1,4 @@
-// Written by Claude Code 2.1.284.
+// Written by Claude Code 2.1.285.
 // Claude Code function hooks: the plugin API's TypeScript declarations.
 //
 // EARLY ACCESS: this surface may change between releases without notice.
@@ -1058,6 +1058,10 @@ declare module 'claude-code' {
   /**
    * The name of a classic hook event as a function-hooks event: the settings
    * hook's own name under `classic` (`classic.Stop`, `classic.PreToolUse`).
+   *
+   * Each fires wherever the engine runs the classic hook, whether or not any
+   * settings hook is configured, and reaches a `*` or `classic.*` hook as it
+   * reaches a named one.
    */
   export type ClassicEventName = `classic.${ClassicHookEvent}`;
 
@@ -2463,7 +2467,8 @@ declare module 'claude-code' {
           speak: (text: string, options?: SpeakOptions) => Promise<SpeakResult>;
       };
       /**
-       * The engine's connected MCP servers.
+       * The engine's MCP servers: calling a connected one's tools, and
+       * connecting one the plugin lists itself.
        */
       mcp: {
           /**
@@ -2487,6 +2492,20 @@ declare module 'claude-code' {
            * })
            */
           call: (server: string, tool: string, args?: Record<string, unknown>) => Promise<McpToolResult>;
+          /**
+           * Connects one of the MCP servers this plugin's own manifest lists; a
+           * server already connected answers at once.
+           *
+           * The same server run under another name answers with that name. Never
+           * rejects for a refusal: the result says why (`reason`, `message`).
+           *
+           * @param server the server's key in this plugin's manifest
+           * @returns connected, with the name `call` takes, or why not
+           * @example
+           * const browser = await $.mcp.connect("browser")
+           * if (browser.isConnected) $.mcp.call(browser.server, "open", { url })
+           */
+          connect: (server: string) => Promise<McpConnectResult>;
       };
       /**
        * The running session, read as plain data; compacting it; and sending a
@@ -2644,6 +2663,18 @@ declare module 'claude-code' {
            * await $.session.send({ to: { agentId }, text: "stop after this file" })
            */
           send: EventCalls['session']['send'];
+          /**
+           * Appends a row to a conversation of the session: the event
+           * `session.append`, the engine's own call for every row it keeps.
+           *
+           * A user-role row the person does not see as typed or a notice, of text
+           * blocks alone in this release (else refused with the reason): listed at
+           * once. `{ deny: reason }` when a plugin above refused it, nothing stored.
+           *
+           * @example
+           * await $.session.append({ message: { type: "user", content: [note] } })
+           */
+          append: (args: SessionAppendArgs) => Promise<SessionAppendResult>;
           /**
            * Holds the session's Anthropic credential on the host and answers an
            * opaque handle and its kind; the secret never reaches the plugin.
@@ -2863,9 +2894,9 @@ declare module 'claude-code' {
            * Logs one record to the destination `entry.to` names, the event
            * `telemetry.log`; `e.to` is pinned, and `anthropic` when left out.
            *
-           * The engine does nothing with it: the built-in plugins that hook the
-           * event queue a first-party row or hand a record to the collector's
-           * sender. They serve built-ins and the engine alone; any plugin may hook.
+           * A first-party row is queued by the built-in plugin that hooks the
+           * event, for built-ins and the engine alone. A collector record reaches
+           * the collector only when the engine raised it; any plugin may hook.
            *
            * @param entry a first-party row, or a collector record
            * @returns once the hooks have answered; rejects when one denies
@@ -3884,8 +3915,8 @@ declare module 'claude-code' {
        * names: a built-in's `$.telemetry.log`, or the engine's own events.
        *
        * `e.to` is pinned: a hook rewrites what the record carries, never where
-       * it goes. `next(e)` resolves `{ value: undefined }`; `{ deny }` rejects
-       * the caller. The engine does nothing with a record: the built-ins do.
+       * it goes. `next(e)` resolves `{ value: undefined }`; `{ deny }` rejects the
+       * caller. Beneath the hooks the engine exports its own collector records.
        *
        * @example
        * on("telemetry.log", { to: "collector" }, ($, e, next) => next(e))
@@ -3948,6 +3979,18 @@ declare module 'claude-code' {
        * on("session.receive", { origin: "peer" }, () => ({ consumed: "muted" }))
        */
       'session.receive': SessionReceiveInput;
+      /**
+       * Fires once per row a conversation of this session keeps (a prompt, a
+       * response block, a tool result, a notice), before it is stored.
+       *
+       * `next({ ...e, message })` rewrites `content`: stored and sent after. The
+       * screen, an SDK stream or Remote Control may show the row just before its
+       * rewrite; the model and the transcript file never read that form.
+       *
+       * @example
+       * on("session.append", { door: "tool-result" }, ($, e, n) => n(scrub(e)))
+       */
+      'session.append': SessionAppendInput;
       /**
        * Fires when a plain-text message is about to leave this conversation for
        * another agent or session (the SendMessage tool, or `$.session.send`).
@@ -4021,7 +4064,7 @@ declare module 'claude-code' {
        * folded and built, nothing swapped in) and at reload; core allows.
        *
        * Return `{ refuse: reason }` and it never joins: no hook, no noun, no tool
-       * of it; the transcript names who refused. Its judges, `$` whole, are the
+       * of it; the debug log names who refused. Its judges, `$` whole, are the
        * plugins admitted before it and the binary's; judge by `tier` and `uses`.
        *
        * @example
@@ -4216,6 +4259,10 @@ declare module 'claude-code' {
        */
       'session.receive': SessionReceiveResult;
       /**
+       * `{ message, uuid }`, the row as stored.
+       */
+      'session.append': SessionAppendResult;
+      /**
        * `{ isDelivered: true }`, or `{ isDelivered: false, reason }`.
        */
       'session.send': SessionSendResult;
@@ -4305,6 +4352,7 @@ declare module 'claude-code' {
       session: {
           start: (input: SessionStartInput) => Promise<SessionStartResult>;
           receive: (input: SessionReceiveInput) => Promise<SessionReceiveResult>;
+          append: (input: SessionAppendInput) => Promise<SessionAppendResult>;
           send: (input: SessionSendArgs) => Promise<SessionSendResult>;
           compact: (input?: SessionCompactArgs) => Promise<SessionCompactResult>;
           attach: (input: SessionAttachInput) => Promise<SessionAttachResult>;
@@ -5367,6 +5415,49 @@ declare module 'claude-code' {
   type MatcherValueOf<I, K> = I extends unknown ? K extends KnownKeys<I> ? I[K] : never : never;
 
   /**
+   * Why `$.mcp.connect` left a server unconnected, in one word.
+   *
+   * `unlisted`: not in the caller's own manifest. `unapproved`: a repository
+   * server not approved. `disabled`: turned off. `policy`: enterprise MCP
+   * policy. `auth`: needs sign-in. `failed`: not resolved, or did not connect.
+   */
+  type McpConnectRefusal = 'unlisted' | 'unapproved' | 'disabled' | 'policy' | 'auth' | 'failed';
+
+  /**
+   * What `$.mcp.connect` resolves to and what an `mcp.connect` hook's
+   * `{ value }` holds: the server connected, or why not.
+   *
+   * @example
+   * const browser = await $.mcp.connect("browser")
+   */
+  type McpConnectResult = {
+      /**
+       * True: the server is connected and its tools are the session's.
+       */
+      isConnected: true;
+      /**
+       * The name /mcp lists it under and `$.mcp.call` takes: usually
+       * `plugin:<plugin>:<server>`.
+       *
+       * Or the name the session already runs the same server under.
+       */
+      server: string;
+  } | {
+      /**
+       * False: the server is not connected.
+       */
+      isConnected: false;
+      /**
+       * Why, in one word.
+       */
+      reason: McpConnectRefusal;
+      /**
+       * The same as one plain sentence, to log or toast.
+       */
+      message: string;
+  };
+
+  /**
    * One block of an MCP result: `type` and the fields that kind of block carries.
    */
   export type McpContentBlock = {
@@ -6199,6 +6290,12 @@ declare module 'claude-code' {
           args: Record<string, unknown>;
       };
       /**
+       * The argument of `$.mcp.connect(server)`.
+       */
+      'mcp.connect': {
+          server: string;
+      };
+      /**
        * The argument of `$.session.cwd()`.
        */
       'session.cwd': NoArgs;
@@ -6495,6 +6592,7 @@ declare module 'claude-code' {
       'audio.play': void;
       'audio.speak': SpeakResult;
       'mcp.call': McpToolResult;
+      'mcp.connect': McpConnectResult;
       'session.cwd': string;
       'session.root': string;
       'session.model': string;
@@ -6938,7 +7036,7 @@ declare module 'claude-code' {
   } | {
       /**
        * The module does not load: no step, no hooks, no tools or commands;
-       * the transcript names the plugin that refused and this reason.
+       * the debug log names the plugin that refused and this reason.
        */
       refuse: string;
       allow?: undefined;
@@ -7208,6 +7306,9 @@ declare module 'claude-code' {
   /**
    * What a `classic.PreToolUse` hook returns: one of `allow`, `ask`, `deny`,
    * or none of them, which passes the call on to the normal permission flow.
+   *
+   * The event fires inside `tool.call`, beneath every plugin's `tool.call` hook
+   * (a test raises it by calling `$.tool.call`).
    */
   export type PreToolUseResult = PreToolUseDecision & {
       /**
@@ -7532,6 +7633,29 @@ declare module 'claude-code' {
   };
 
   /**
+   * One styled run a surface paints over the prompt draft: `[start, end)` of
+   * a text, in UTF-16 code units like PromptBox `cursor`. Paint only.
+   *
+   * A range outside the text is clamped into it, an empty one dropped, and a
+   * boundary inside a grapheme moves back to its start. Later entries win per
+   * style key.
+   *
+   * @example { start: 4, end: 8, color: 'warning', bold: true }
+   */
+  export type PromptDecoration = {
+      /**
+       * The first code unit painted: an integer offset into the text the list
+       * travels beside, clamped into it.
+       */
+      start: number;
+      /**
+       * The code unit past the last one painted; a run with `end <= start`,
+       * once clamped, paints nothing.
+       */
+      end: number;
+  } & Pick<TextProps, 'color' | 'backgroundColor' | 'dimColor' | 'bold' | 'italic' | 'underline' | 'strikethrough'>;
+
+  /**
    * The input of `prompt.edit` (prompt-edit/): one edit the person makes in the
    * prompt box, as the draft before it and the splice the editor made of it.
    */
@@ -7598,7 +7722,19 @@ declare module 'claude-code' {
    * in. Rewrite it (`{ ...r, text, cursor }`) to change what lands; answer
    * `{ text: e.text, cursor: e.cursor }` without `next` to consume the key.
    */
-  export type PromptEditResult = PromptBox;
+  export type PromptEditResult = PromptBox & {
+      /**
+       * Runs to paint over this answer's own `text` (PromptDecoration); none
+       * when absent.
+       *
+       * Kept on the same characters while the next edit's answer is pending,
+       * then replaced by that answer's list (or by none).
+       *
+       * @example const r = await next(e)
+       * return { ...r, decorations: [...(r.decorations ?? []), mine] }
+       */
+      decorations?: PromptDecoration[];
+  };
 
   /**
    * `prompt.fill`'s input as a plugin's `$.prompt.fill(args)` takes it: no
@@ -7613,6 +7749,17 @@ declare module 'claude-code' {
        * Where it goes (PromptFillMode); `replace` when left out.
        */
       mode?: PromptFillMode;
+      /**
+       * Runs to paint over `text` (PromptDecoration), offsets into `text` as
+       * given; the engine moves them to where it lands. None when absent.
+       *
+       * Replaced by the next edit's `prompt.edit` answer; with no hook on it,
+       * gone at the draft's next change.
+       *
+       * @example $.prompt.fill({ text: ' next', mode: 'append',
+       *   decorations: [{ start: 1, end: 5, italic: true }] })
+       */
+      decorations?: PromptDecoration[];
   };
 
   /**
@@ -7656,6 +7803,9 @@ declare module 'claude-code' {
       /**
        * What the box takes; the person edits it or presses Enter.
        * `next({ ...e, text })` writes another.
+       *
+       * The box takes it without the code points a terminal draws as nothing, as
+       * the composer removes them when a person sends; all else lands as written.
        */
       text: string;
       /**
@@ -7668,6 +7818,16 @@ declare module 'claude-code' {
        * starts. Pinned: `next(e)` passes it on as received.
        */
       origin: PromptFillOrigin;
+      /**
+       * Runs to paint over `text` once it lands (PromptDecoration), offsets
+       * into `text`; absent when the call named none.
+       *
+       * What the chain passes down is what paints: a hook strips them so.
+       *
+       * @example on('prompt.fill', ($, e, next) =>
+       *   next({ ...e, decorations: [] }))
+       */
+      decorations?: PromptDecoration[];
   };
 
   /**
@@ -8794,7 +8954,9 @@ declare module 'claude-code' {
        * files, ran 2 shell commands`): reads, searches, listings.
        *
        * A hook that sets `isExpanded` unfolds the group where it is, and each row
-       * it unfolds into is a `ToolUse` drawing a `ToolUse` hook then sees.
+       * it unfolds into is a `ToolUse` drawing a `ToolUse` hook then sees. In
+       * fullscreen mode the ctrl+o transcript does not fold runs: each call
+       * there is a `ToolUse` row and no `ToolGroup` is drawn.
        *
        * Raised on every surface.
        */
@@ -8810,7 +8972,8 @@ declare module 'claude-code' {
           isActive: boolean;
           /**
            * Whether each call draws as its own `ToolUse` row (true under
-           * `--verbose` and in the ctrl+o transcript) or the group draws one line.
+           * `--verbose` and in the non-fullscreen ctrl+o transcript) or the group
+           * draws one line.
            *
            * The one prop of the three a rewrite changes on the screen.
            */
@@ -9057,7 +9220,8 @@ declare module 'claude-code' {
            *
            * That slot is capped at half the terminal's rows, the prompt's included.
            * A tree of at most `maxRows` rows shows whole; a taller one scrolls in a
-           * window of `scroll.bodyRows`, and a bare digit arms no Button's hotkey.
+           * window of `scroll.bodyRows`, and a bare digit arms only the hotkeys of
+           * the Buttons wholly inside that window, never one scrolled out of view.
            */
           maxRows: number;
           /**
@@ -9301,6 +9465,176 @@ declare module 'claude-code' {
        * the bottom of a `ui.select` chain. No model turn unless it asks one.
        */
       onSelect: (value: string, e: UiSelectArgument) => void;
+  };
+
+  /**
+   * `session.append`'s input as a plugin's `$.session.append(args)` takes it:
+   * the row's kind and text, and the loop it joins.
+   *
+   * Its door (`note`), origin (the calling plugin) and id are the engine's to
+   * set; a hook above, or the organization's policy plugin, may rewrite or
+   * refuse it like any call on `$`.
+   */
+  type SessionAppendArgs = {
+      /**
+       * The row: `type: "user"` for a user-role row the person does not see as
+       * typed (the model reads it), `"system"` for a notice the model never reads.
+       *
+       * Its `content` is text blocks alone (one, for a notice): the bottom
+       * refuses any other block, and any other row type, with the reason.
+       */
+      message: {
+          type: 'user' | 'system';
+          content: ApiContentBlock[];
+      };
+      /**
+       * The running subagent whose conversation the row joins; absent for main.
+       * One that names no running loop is refused.
+       */
+      agentId?: string;
+  };
+
+  /**
+   * Which door a row came in by, decided from the row alone; a closed set,
+   * pinned on the event and the key a matcher narrows on.
+   */
+  type SessionAppendDoor = 'prompt' | 'command' | 'response' | 'tool-result' | 'tool-message' | 'delivery' | 'attachment' | 'hook-context' | 'note' | 'compaction' | 'notice';
+
+  /**
+   * The input of `session.append`: one row being appended to a conversation of
+   * this session, by the engine site that originates it or by a plugin's call.
+   *
+   * Not on `e`, so stored as made: a tool result's structured record, the row's
+   * timestamps, parent links and provenance stamps, an attachment's payload
+   * (the model reads its recorded rendering, which `content` rewrites).
+   */
+  type SessionAppendInput = {
+      /**
+       * The row as it will be kept (SessionAppendMessage). Its `content` is a
+       * hook's to rewrite; the engine puts back what it pins.
+       */
+      message: SessionAppendMessage;
+      /**
+       * Which door the row came in by (SessionAppendDoor); the key a matcher
+       * narrows on. Pinned.
+       */
+      door: SessionAppendDoor;
+      /**
+       * Who caused the row (SessionAppendOrigin): the person, the model, a tool,
+       * the engine, a settings hook, a plugin. Pinned.
+       */
+      origin: SessionAppendOrigin;
+      /**
+       * The row's id, the same in the transcript file and on every later read,
+       * so a hook can keep a table by row before calling `next`. Pinned.
+       */
+      uuid: string;
+      /**
+       * The loop whose conversation keeps the row: a subagent's id, as `turn.step`
+       * and `tool.call` carry it; absent on main.
+       *
+       * Pinned: a different value is refused, one left out is kept.
+       */
+      agentId?: string;
+  };
+
+  /**
+   * One row of a conversation as `session.append` hands it: how the transcript
+   * files it, under which role a request carries it, and its blocks.
+   *
+   * `{ role, content }` of a row a request carries is an ApiMessage, so code
+   * written for `$.session.messages({ as: "api" })` reads it unchanged.
+   */
+  type SessionAppendMessage = {
+      /**
+       * How the transcript files the row: `user`, `assistant`, `attachment` (what
+       * the engine injects beside the conversation), `system` (a notice).
+       *
+       * Pinned, as `name`, `role` and `isMeta` are: left out it is kept, changed
+       * it fails the hook.
+       */
+      type: 'user' | 'assistant' | 'attachment' | 'system';
+      /**
+       * An attachment's type (`queued_command`, `nested_memory`, ...) or a
+       * notice's subtype (`compact_boundary`, `local_command`, ...). Pinned.
+       *
+       * Absent on user and assistant rows. Builds add and retire names.
+       */
+      name?: string;
+      /**
+       * Under which role a request carries the row; absent when none does (a
+       * notice, a record with no bytes on the wire, a virtual row). Pinned.
+       */
+      role?: 'user' | 'assistant';
+      /**
+       * True on a user-side row the person does not see as typed (a reminder, a
+       * nudge, a delivery's text). Pinned.
+       */
+      isMeta?: true;
+      /**
+       * The row's blocks in order (ApiContentBlock): an attachment's as the
+       * engine recorded its rendering, a notice's as one text block.
+       *
+       * Rewritable: text blocks, a tool_result's `content` and `is_error`. Media
+       * blocks may be dropped or moved, not changed or added. Thinking, tool_use,
+       * unknown kinds and every tool_result's `tool_use_id` are put back.
+       */
+      content: ApiContentBlock[];
+  };
+
+  /**
+   * Who caused a row, as the engine knows it from the row itself: a submission's
+   * sender, an injected row's author, the model, or the tool that was called.
+   */
+  type SessionAppendOrigin = PromptOrigin | PromptAttachmentOrigin | {
+      /**
+       * A block of the model's response, or the engine's stand-in for one.
+       */
+      kind: 'model';
+      /**
+       * Whose response it is: the id the response names.
+       */
+      model: string;
+  } | {
+      /**
+       * A tool call's result, or a row a tool handed over beside it.
+       */
+      kind: 'tool';
+      /**
+       * Which one was called, by name; `unknown` when no call of that id is
+       * found.
+       */
+      tool: string;
+  };
+
+  /**
+   * What a `session.append` hook returns and what `next(e)` resolves to: the
+   * row as the session stored it, or `{ deny: reason }` for a plugin's own call.
+   *
+   * `next(e)` resolves once the row is kept. A hook relays it unchanged: one
+   * that answers without `next`, or another row, is skipped. Only a plugin's own
+   * append (door `note`) may be refused, in place of `next`: nothing is stored.
+   */
+  type SessionAppendResult = {
+      /**
+       * The row as stored: what arrived at the bottom, the pinned parts put
+       * back.
+       */
+      message: SessionAppendMessage;
+      /**
+       * The stored row's id: the same in the transcript file and on every
+       * later read.
+       */
+      uuid: string;
+      deny?: undefined;
+  } | {
+      /**
+       * Refuses a plugin's own append, so nothing is stored: the call
+       * resolves to this, the reason the refusing hook gave.
+       */
+      deny: string;
+      message?: undefined;
+      uuid?: undefined;
   };
 
   /**
@@ -13167,6 +13501,10 @@ declare module 'claude-code/testing' {
   /**
    * A classic hook event the engine raises on its own, by its own name
    * (`SessionStart`, `Stop`): all but `PreToolUse`, which rides `tool.call`.
+   *
+   * `$.tool.call` raises `classic.PreToolUse` as a session does: beneath every
+   * plugin's `tool.call` hook and above the test's own, which a deny never
+   * reaches (the call resolves errored, the reason its `text`).
    */
   export type ClassicEvent = Exclude<ClassicEventName, 'classic.PreToolUse'> extends `classic.${infer E}` ? E : never;
 
