@@ -1,4 +1,4 @@
-// Written by Claude Code 2.1.285.
+// Written by Claude Code 2.1.286.
 // Claude Code function hooks: the plugin API's TypeScript declarations.
 //
 // EARLY ACCESS: this surface may change between releases without notice.
@@ -2760,6 +2760,18 @@ declare module 'claude-code' {
            * void $.prompt.suggest({ text: "run the tests you just wrote" })
            */
           suggest: EventCalls['prompt']['suggest'];
+          /**
+           * Returns the system prompt's sections for `facts`: the event
+           * `prompt.compose`, the call the engine makes for every prompt it sends.
+           *
+           * A fact left out is the session's own (its model, its tools). Through
+           * every other plugin's hook, over the engine's own composition; composed
+           * for nobody to send, so nothing the session holds is written.
+           *
+           * @example
+           * const ids = (await $.prompt.compose()).sections.map(s => s.id)
+           */
+          compose: EventCalls['prompt']['compose'];
       };
       /**
        * The tools the model has in this session, and running one.
@@ -3816,9 +3828,9 @@ declare module 'claude-code' {
        * Fires once per named section of the system prompt, when the engine
        * assembles it; `next(e)` resolves to `{ text }` as core computed it.
        *
-       * Sections are cached by name for the session until
-       * `$.ui.invalidate("prompt.section")`: an unstable answer spends the
-       * model's prompt cache on every call. A hook that fails passes it through.
+       * `e.name` is the section's id, on every model the one `prompt.compose`
+       * lists. Cached until `$.ui.invalidate("prompt.section")`: an unstable
+       * answer spends the prompt cache every call; a failed hook passes through.
        *
        * @example
        * on("prompt.section", { name: "memory" }, () => ({ text: null }))
@@ -3836,6 +3848,18 @@ declare module 'claude-code' {
        * on("prompt.context", () => ({ blocks: [] }))
        */
       'prompt.context': PromptContextInput;
+      /**
+       * Fires when the engine renders a system prompt; `next(e)` resolves to
+       * `{ sections }`, each `{ id, text, scope }`, in the order they are sent.
+       *
+       * The bottom is the engine's own composition: its ids depend on the prompt
+       * it composes (`lean`, `bare` in `e.traits`), so read them off what `next(e)`
+       * answered. Append, replace, reorder or drop; with no `next`, replace it all.
+       *
+       * @example
+       * on("prompt.compose", async ($, e, next) => added(await next(e), POLICY))
+       */
+      'prompt.compose': PromptComposeInput;
       /**
        * Fires once per message the engine injects for the model on its own (a
        * reminder, a mode transition, a mentioned file), as a request carries it.
@@ -4211,6 +4235,11 @@ declare module 'claude-code' {
        */
       'prompt.context': PromptContextResult;
       /**
+       * `{ sections }`, every `shared` one ahead of every `session` one (a
+       * section left out is not sent).
+       */
+      'prompt.compose': PromptComposeResult;
+      /**
        * `{ text }` (null leaves the attachment out).
        */
       'prompt.attachment': PromptAttachmentResult;
@@ -4338,6 +4367,7 @@ declare module 'claude-code' {
           section: (input: PromptSectionInput) => Promise<PromptSectionResult>;
           context: (input: PromptContextInput) => Promise<PromptContextResult>;
           attachment: (input: PromptAttachmentInput) => Promise<PromptAttachmentResult>;
+          compose: (input?: PromptComposeArgs) => Promise<PromptComposeResult>;
       };
       skill: {
           prompt: (input: SkillPromptInput) => Promise<SkillPromptResult>;
@@ -7563,6 +7593,127 @@ declare module 'claude-code' {
   };
 
   /**
+   * What a plugin passes `$.prompt.compose`: the facts it wants composed for,
+   * each one it leaves out read off the session (its model, its tools).
+   */
+  export type PromptComposeArgs = Partial<PromptComposeInput>;
+
+  /**
+   * The input of `prompt.compose`: the facts a system prompt is composed from,
+   * each already resolved by the engine, at the moment it renders one.
+   */
+  export type PromptComposeInput = {
+      /**
+       * The id of the model the request is for; pinned, the field a matcher
+       * narrows on.
+       */
+      model: string;
+      /**
+       * The model whose prompt is rendered: `model`, unless the engine renders
+       * another model's prompt for it (a model it holds no prompt of its own for).
+       */
+      promptModel: string;
+      /**
+       * Where the session draws at this render, as `$.session.surfaces()`
+       * answers: `terminal` first under the REPL; empty where nothing draws.
+       */
+      surfaces: readonly RenderSurface[];
+      /**
+       * The names of the tools the request offers the model; the engine's own
+       * composition reads them against the session's, an unknown name ignored.
+       */
+      tools: readonly string[];
+      /**
+       * What the person chose in place of the default way of answering, and
+       * whether it keeps the coding instructions; null for the default style.
+       */
+      outputStyle: {
+          name: string;
+          isKeepingCodingInstructions: boolean;
+      } | null;
+      traits: readonly PromptComposeTrait[];
+  };
+
+  /**
+   * What a `prompt.compose` hook returns: the sections of the system prompt,
+   * in order, every `shared` one ahead of every `session` one.
+   *
+   * A section left out is not sent; a hook that never calls `next` answers
+   * the whole list. The engine joins each side, places the cache boundary
+   * between them and every cache marker itself.
+   */
+  export type PromptComposeResult = {
+      sections: readonly PromptComposeSection[];
+  };
+
+  /**
+   * Which side of the prompt cache's boundary a section of the system prompt
+   * sits on: `shared` before it, `session` after it.
+   *
+   * `shared` is text that reads the same for every person on this build and
+   * model: it is sent in the block the API may cache across organizations.
+   * `session` is text that varies with the person, the machine or the session.
+   *
+   * The engine places the one boundary and every cache marker itself,
+   * whatever a list says; `shared` text that varies hits that cache for nobody.
+   */
+  export type PromptComposeScope = 'shared' | 'session';
+
+  /**
+   * One section of the system prompt as `prompt.compose` answers it: a stable
+   * id, the text the model reads, and the side of the cache boundary it is on.
+   *
+   * @example
+   * const POLICY = { id: "acme:policy", text: "# Policy\n...", scope: "session" }
+   */
+  export type PromptComposeSection = {
+      /**
+       * What a hook above finds the section by, to replace, move or drop it;
+       * never empty, and unique in one list.
+       *
+       * A plugin's own is `<plugin>:<name>`; a bare name is the engine's. The full
+       * prompt opens `intro`, `system`, `doing_tasks`, `actions`, `tools`, `tone`;
+       * the short one opens `lean_body` instead; `--bare`'s one section is `bare`.
+       */
+      id: string;
+      /**
+       * The section's text, sent as written; sections on one side of the
+       * boundary are joined by a blank line, in the list's order.
+       */
+      text: string;
+      scope: PromptComposeScope;
+  };
+
+  /**
+   * One branch the engine's own composition of the system prompt takes on the
+   * request or the session before it computes any section: a closed set.
+   *
+   * `bare`: the session runs with the one-line prompt (`--bare`). `lean`: the
+   * prompt model takes the short body. `sdk-preset`: the SDK's `claude_code`
+   * preset, whose per-person sections ride the first user message instead.
+   *
+   * `teammate`: an in-process teammate's render of its lead's prompt.
+   * `analysis`: a render that measures the prompt (`/context`) and sends
+   * nothing. `print`: a session with no terminal behind it (`-p`, the SDK).
+   *
+   * `skills`: the Skill tool has commands to list. `send-user-message`: the
+   * session speaks to the person through a message tool.
+   *
+   * Rewritten going down, `sdk-preset`, `teammate` and `analysis` steer the
+   * engine's composition; the rest it derives itself, so they tell a hook what
+   * it will do. What one section's own text turns on (a flag) is not here.
+   *
+   * `bare` and `lean` say which sections come back. With `bare`: one, `bare`.
+   * With `lean`: `lean_body`, where the full prompt opens `intro`, `system`,
+   * `doing_tasks`, `actions`, `tools`, `tone`.
+   *
+   * Past that opening the full and the short prompt hold the session's
+   * sections (`communication`, `pronouns`, `memory`, ...), each left out when
+   * it has no text.
+   */
+  export type PromptComposeTrait = 'bare' | 'lean' | 'sdk-preset' | 'teammate' | 'analysis' | 'print' | 'skills' | 'send-user-message';
+
+  /**
    * One block of the context the first user message carries: a name the
    * engine keys it by and the text under it.
    */
@@ -7996,14 +8147,24 @@ declare module 'claude-code' {
       kind: 'slack-ping';
   } | {
       /**
-       * A plugin's `$.prompt.submit`; the model reads the prompt under the
-       * plugin's name unless a hook leaves the origin out of its answer.
+       * A plugin's `$.prompt.submit`.
+       *
+       * The model reads the prompt under the plugin's name ("The <name> plugin
+       * sent a message: ...") unless the plugin submitted it `asUser`.
        */
       kind: 'plugin';
       /**
        * The submitting plugin's name.
        */
       name: string;
+      /**
+       * True when the plugin submitted the text as the person's own words
+       * (`$.prompt.submit({ text, asUser: true })`).
+       *
+       * The model reads it bare; the origin is still the plugin's for every
+       * hook and provenance gate.
+       */
+      asUser?: true;
   };
 
   /**
@@ -8012,8 +8173,8 @@ declare module 'claude-code' {
    */
   export type PromptSectionInput = {
       /**
-       * As the engine names the section (`env_info_simple`, `memory`, ...); the
-       * key a matcher narrows on.
+       * The section's id (`env_info_simple`, `memory`, ...), the same on every
+       * model and the one `prompt.compose` lists; the key a matcher narrows on.
        */
       name: string;
       /**
@@ -8037,7 +8198,20 @@ declare module 'claude-code' {
    * `origin` is the calling plugin's name; `turnId` is the turn a prompt typed
    * mid-turn ran over; `wait` is false, as a plugin's prompt runs once idle.
    */
-  export type PromptSubmitArgs = Omit<PromptSubmitInput, 'origin' | 'turnId' | 'wait' | 'context'>;
+  export type PromptSubmitArgs = Omit<PromptSubmitInput, 'origin' | 'turnId' | 'wait' | 'context'> & {
+      /**
+       * Submit the text as the person's own words, read bare without the "The
+       * <plugin> plugin sent a message" frame; absent means framed.
+       *
+       * The origin every hook sees stays `{ kind: 'plugin', name, asUser: true }`
+       * and the transcript still names the plugin; `@file` mentions and pasted
+       * images are not expanded for a plugin's prompt, `asUser` or not.
+       *
+       * @example
+       * await $.prompt.submit({ text: 'what the person typed', asUser: true })
+       */
+      asUser?: true;
+  };
 
   /**
    * A pasted or attached non-text item of a submitted prompt; its kind, never
@@ -9171,9 +9345,10 @@ declare module 'claude-code' {
        * The dim hint line under the prompt (`? for shortcuts`, `esc to
        * interrupt`, the pills beside them). One instance.
        *
-       * A hook rewrites `hint`, drawn in the line's place, or draws its own tree;
-       * `isDraft` and `isWorking` say what the line is for. On the terminal, until
-       * a new answer lands the last keeps its row (the engine's line before any).
+       * A hook rewrites `hint`, drawn in the line's place, sets `tail` to add to
+       * the line as the engine draws it, or draws its own tree; `isDraft` and
+       * `isWorking` say what the line is for. On the terminal, until a new answer
+       * lands the last keeps its row (the engine's line before any).
        *
        * Raised on the terminal and desktop surfaces only.
        */
@@ -9194,6 +9369,15 @@ declare module 'claude-code' {
            * between parts.
            */
           hint: string;
+          /**
+           * Text a hook adds after the line; absent as the engine hands it.
+           *
+           * The terminal keeps the engine's line (its pills stay live) and draws
+           * `tail` dim at its end, cut where the row ends and left out where under
+           * four columns of it would show; no other surface draws it yet. A
+           * rewritten `hint` replaces the line, `tail` with it.
+           */
+          tail?: string;
       };
       /**
        * The band directly above the prompt input, where the surveys draw; the
