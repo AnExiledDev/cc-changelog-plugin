@@ -10,17 +10,9 @@ the top saying how far behind the running build is. It also registers fifteen
 tools the model can call, and polls for releases in the background so a
 session says something when one lands.
 
-It is here because of what it is built on rather than what it does: Claude Code
-v2.1.269 ships a plugin runtime that no page of `code.claude.com/docs` mentions.
-Nothing in the 192-page docs corpus captured on 2026-09-11 names `modules`,
-`surface`, `$.ui.render` or any of it.
+It is here because of what it is built on rather than what it does: Claude Code v2.1.269 shipped a plugin runtime, mods, that no page of `code.claude.com/docs` mentioned until Anthropic published [their mods docs](https://code.claude.com/docs/en/plugins/mods/overview) with v2.1.287. Nothing in the 192-page docs corpus captured on 2026-09-11 named `modules`, `surface`, `$.ui.render` or any of it.
 
-The build documents itself, though, and only once the flag is on: it carries a
-`plugin-authoring` skill and a `/plugin-types` command, both gated on the same
-switch as the runtime. `/plugin-types` writes `claude-code.d.ts` out of the
-running build - 560 KB of declarations, every event's input and result, every
-method on `$`, every element's props. `types/claude-code.d.ts` here is the copy
-v2.1.287 wrote. **It is the authority; the notes below are the map to it.**
+The build documents itself as well. Each time it loads a mod from a folder you own, it writes `.claude-plugin/types/claude-code/index.d.ts` beside it: 560 KB of declarations, every event's input and result, every method on `$`, every element's props. `types/claude-code.d.ts` here is the copy v2.1.287 wrote. **It is the authority; the notes below are the map to it.**
 
 The site it reads is [changelogs.core-directive.com](https://changelogs.core-directive.com).
 
@@ -34,7 +26,7 @@ Operator, 2026-09-09 (op:2026-09-09-2117-e2bd):
 
 ```bash
 git clone https://github.com/AnExiledDev/cc-changelog-plugin.git
-CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 claude --plugin-dir ./cc-changelog-plugin
+claude --plugin-dir ./cc-changelog-plugin
 ```
 
 `--plugin-dir` loads it for that session only and watches the folder, which is
@@ -46,13 +38,9 @@ claude plugin marketplace add AnExiledDev/cc-changelog-plugin
 claude plugin install cc-changelog@cc-changelog
 ```
 
-Upgrading later is `claude plugin marketplace update cc-changelog` followed by
-`claude plugin update cc-changelog@cc-changelog`. Start `claude` with the same
-environment variable either way.
+Upgrading later is `claude plugin marketplace update cc-changelog` followed by `claude plugin update cc-changelog@cc-changelog`.
 
-**The flag is not optional.** Without `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` the
-runtime this is built on does not exist, the module never loads, and the
-session says nothing about why.
+**It needs Claude Code v2.1.287 or later.** From that build mods load by default. Up to v2.1.286 they sat behind a rollout flag and `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1` turned them on; v2.1.287 ignores the variable. If the module doesn't load, Anthropic's [Troubleshoot a mod](https://code.claude.com/docs/en/plugins/mods/troubleshoot) covers why.
 
 Then type `/whatsnew`. Two things make the loop fast:
 
@@ -281,8 +269,7 @@ then confirmed by running it, except where it says otherwise.
 
 - **The gate.** `pretty-v2.1.267.js:223878`: GrowthBook flag
   `tengu_plugin_hooks_modules`, default `false`, overridden by the environment
-  variable `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS`. Also off when hooks are disabled
-  or the process is restricted.
+  variable `CLAUDE_CODE_ENABLE_FUNCTION_HOOKS`. Also off when hooks are disabled or the process is restricted. At v2.1.287 the default is `true` and the variable is no longer read.
 - **The manifest.** `hooks/hooks.json` takes `modules` (exactly one path, a
   module exporting `register(on)`) and `surface` (a second module drawing
   `Client` elements). `hooks` and `modules` may both be present.
@@ -382,16 +369,12 @@ walk rather than a download.
 covering every event's input and result, every method on `$`, and every
 element's props. **It is the authority and this README is the map to it.**
 
-Nobody wrote it. Claude Code writes it out of the running build when you type
-`/plugin-types`, and the copy here is what 2.1.287 wrote. It is early access
-and may move between releases without notice, so regenerate against your own
-build rather than trusting this file's age. `types/README.md` has how, and the
+Nobody wrote it. Claude Code writes it out of the running build beside every mod it loads from a folder you own (up to v2.1.286 you typed `/plugin-types` for it), and the copy here is what 2.1.287 wrote. It is early access and may move between releases without notice, so regenerate against your own build rather than trusting this file's age. `types/README.md` has how, and the
 terms it is published under, which are not this repository's MIT.
 
 ## Caveats
 
-Unannounced and undocumented, so the shape can change in any release, and a
-reader on a build without the flag sees nothing at all. Verified on v2.1.267
+The surface is still marked early access, so the shape can change in any release. Up to v2.1.286 a reader on a build without the rollout flag sees nothing at all, and from v2.1.287 mods load by default unless Anthropic switches them off remotely. Verified on v2.1.267
 and v2.1.269, on Linux, on the `terminal` surface. The `desktop`, `mobile` and `vscode`
 surfaces, the `surface` module and `Client` elements are read from the bundle
 and the declarations and have not been run.

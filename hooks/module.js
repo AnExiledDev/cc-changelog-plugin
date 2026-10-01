@@ -2345,7 +2345,7 @@ const TOOLS = [
             "symbol in full. An event answers with the declarations of what arrives and what may " +
             "be returned inlined under it; every answer names the other `types` it mentions, with " +
             "their anchors, so a shape is one call away. This is the surface the `reference` " +
-            "tool's `hook` family only names and the `docs` corpus does not describe at all. " +
+            "tool's `hook` family only names, in full, where Anthropic's mods pages in the `docs` corpus give a table at a time. " +
             "Pass `changes: true` for how the surface moved between releases (added, removed, " +
             "changed and docs-only symbols, with before/after shapes), and a `version` with it " +
             "for one release's items. " +
@@ -2389,12 +2389,12 @@ const TOOLS = [
         name: "mods",
         description:
             "How to actually write a Claude Code hooks module, as ten pages of hand-written " +
-            "guide: what a mod is and the gate that turns it on, the files one needs, the five " +
+            "guide: what a mod is and which builds load one, the files one needs, the five " +
             "tiers and what `next()` can do, the engine interface, the event catalogue, drawing " +
             "in the terminal, `userConfig`, testing, confirmed gotchas reproduced against a real " +
-            "build, and worked recipes. Reach for this before writing any hooks code: nothing in " +
-            "Anthropic's published documentation describes this runtime, so a model working from " +
-            "the type declarations alone is guessing at how the pieces fit. Given nothing it lists " +
+            "build, and worked recipes. Anthropic's own mods pages (in the `docs` corpus since 2.1.287) " +
+            "are the contract; this guide is what the build does around it, the traps, and where the " +
+            "two disagree, so read both before writing hooks code. Given nothing it lists " +
             "the ten pages with each one's headings, which is enough to ask for a part by name; " +
             "given a `page` it answers that page's markdown one window at a time, with `section` " +
             "to read one heading and `next_offset` handed back as `offset` to read on. For a " +
