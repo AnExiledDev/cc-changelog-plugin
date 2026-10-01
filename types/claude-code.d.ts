@@ -1,12 +1,11 @@
-// Written by Claude Code 2.1.286.
+// Written by Claude Code 2.1.287.
 // Claude Code function hooks: the plugin API's TypeScript declarations.
 //
 // EARLY ACCESS: this surface may change between releases without notice.
 // Written by the engine each time it loads a mod from a folder the person
-// owns, beside that mod as .claude-plugin/types/claude-code/index.d.ts, and
-// by `/plugin-types` into a directory the person names; written again
-// after an update rather than edited. The first line names the Claude Code
-// version that wrote it. TypeScript 5.4 or newer reads it.
+// owns, beside that mod as .claude-plugin/types/claude-code/index.d.ts;
+// written again after an update rather than edited. The first line names
+// the Claude Code version that wrote it. TypeScript 5.4 or newer reads it.
 // `claude plugin validate <dir>` is the other half: it reads a plugin's
 // manifest and its hooks module's source the way the engine will and
 // reports what the module hooks and calls and everything the engine would
@@ -21,8 +20,10 @@
 // no DOM, no Node. The module, and every file it imports from the plugin,
 // is named .ts, .tsx, .jsx, .js, .mjs, .cjs, .mts or .cts (a file named
 // otherwise is not loaded) and is an ES module whatever its suffix: there
-// is no `require`. The elements a render hook draws with (`Box`, `Text`,
-// `Button`, ...) are not globals: they come from the surface's table,
+// is no `require`. A file of the plugin is imported with an `import`
+// declaration. A module holding `import()` does not load. The elements a
+// render hook draws with (`Box`, `Text`, `Button`, ...) are not globals:
+// they come from the surface's table,
 //   const { Box, Text } = $.ui.resolve(e)
 //
 // Also here: 'claude-code/testing', the kit a plugin's *.test.ts and
@@ -72,20 +73,20 @@
 //       "noEmit": true, "skipLibCheck": true,
 //       "jsx": "react", "jsxFactory": "h", "jsxFragmentFactory": "Fragment"
 //     },
-//     "include": [".claude/types", "hooks", "tests"]
+//     "include": [".claude-plugin/types", "hooks", "types", "tests"]
 //   }
-// ".claude/types" is where /plugin-types writes this file and, beside it,
-// claude-code-mcp.d.ts and claude-code-plugins.d.ts, the index of the
-// enabled plugins' type contracts, each copied to claude-code-plugins/
-// <plugin>.d.ts: what a plugin adds to `$` in engine.create, so a plugin
-// you depend on is typed with nothing copied (the include above takes the
-// whole folder). "hooks" is the plugin's hooks/ folder and "tests" its test
-// files. `lib` names no DOM: the environment has none, and its `Text`
-// would shadow the element. A mod the engine loads from a folder the person
-// owns has these options without writing them: its tsconfig.json extends
-// .claude-plugin/types/tsconfig.json, which carries them with that folder
-// as the one type root, holding this file and one entry per plugin the
-// mod's plugin.json lists under "dependencies" (that plugin's own contract).
+// ".claude-plugin/types" is where the engine lays this file (claude-code/)
+// and, beside it, this build's built-in tools (claude-code-tools/), the MCP
+// tools connected when the mod last reloaded (claude-code-mcp/) and one entry
+// per plugin the mod's plugin.json lists under "dependencies" (that plugin's
+// own contract): what it adds to `$` in engine.create, so a plugin you
+// depend on is typed with nothing copied (the include above takes the whole
+// folder). "hooks" is the plugin's hooks/ folder, "types" its own contract
+// and "tests" its test files. `lib` names no DOM: the environment has
+// none, and its `Text` would shadow the element. A mod with no tsconfig of
+// its own has these options without writing them: the engine gives it a
+// tsconfig.json that extends .claude-plugin/types/tsconfig.json, which
+// carries them with that folder as the one type root.
 //
 // A plugin that adds a noun to `$` ships its own contract: a .d.ts its
 // plugin.json names as "types", exporting the noun's types at its top level
@@ -829,7 +830,7 @@ declare module 'claude-code' {
 
   /**
    * One variant per built-in tool; with none in the table (a plugin author's
-   * project before `/plugin-types` ran), one loose variant over every name.
+   * project with no tools entry laid), one loose variant over every name.
    */
   export type BuiltinToolCallInput = [BuiltinToolName] extends [never] ? BuiltinToolCallInputFallback : {
       [N in BuiltinToolName]: ToolInputOf<N, BuiltinToolInputs[N]>;
@@ -858,8 +859,8 @@ declare module 'claude-code' {
    * empty until a declaration file adds entries, then `e.tool === "Bash"`
    * narrows `e` to Bash's arguments.
    *
-   * `/plugin-types` writes this build's set beneath the engine's declarations
-   * (claude-code.d.ts), from each tool's input schema.
+   * The engine lays this build's set beside a mod it loads
+   * (claude-code-tools/index.d.ts), from each tool's input schema.
    *
    * @example
    * interface BuiltinToolInputs { Bash: { command: string; timeout?: number } }
@@ -877,9 +878,9 @@ declare module 'claude-code' {
    * merging; empty until a declaration file adds entries, then after
    * `e.tool === "Bash"` the `result` of `next(e)` is Bash's record.
    *
-   * `/plugin-types` writes this build's set beneath the engine's declarations
-   * (claude-code.d.ts), from each tool's output schema; a tool without one is
-   * `unknown`.
+   * The engine lays this build's set beside a mod it loads
+   * (claude-code-tools/index.d.ts), from each tool's output schema; a tool
+   * without one is `unknown`.
    *
    * @example
    * interface BuiltinToolResults { Bash: { stdout: string; stderr: string } }
@@ -2441,14 +2442,16 @@ declare module 'claude-code' {
            * Plays one audio clip, starting now; clips are not queued, so two calls
            * play together (a bed under speech).
            *
-           * `{ asset }` is the plugin's own file, loaded by the engine and played
-           * through the platform's player (`afplay` on macOS). Resolves when
-           * playback ends; rejects, naming the cause, when the clip cannot play.
+           * `{ asset }` is the plugin's own file; `afplay` plays it on macOS, and a
+           * Linux or Windows terminal, having no player, plays nothing. Resolves once
+           * played or skipped; rejects, naming the cause, when the clip cannot play.
            *
            * @param clip the plugin's own file (`{ asset }`), a URL the engine
            *   fetches, or the bytes as base64 with their MIME type
            * @param options `shouldLoop`, `gain`, and an AbortSignal that stops the
            *   clip
+           * @example
+           * await $.audio.play({ asset: "sounds/done.wav" })
            */
           play: (clip: AudioClip, options?: PlayOptions) => Promise<void>;
           /**
@@ -3401,6 +3404,56 @@ declare module 'claude-code' {
   };
 
   /**
+   * One `prompt.attachment` input of a type PromptAttachmentDetailOf names:
+   * the attachment's text, and under `detail` the facts it was rendered from.
+   *
+   * A row the engine made holds them. One a transcript edited by hand holds
+   * can lack them, and then carries no `detail` key: read it as it may be.
+   */
+  type DeclaredAttachmentInput<K extends keyof PromptAttachmentDetailOf> = {
+      /**
+       * As the engine names the attachment's kind, one of the names that
+       * carry a `detail`; the key a matcher narrows on. Pinned.
+       */
+      type: K;
+      /**
+       * What the model reads for this attachment, inside the engine's framing;
+       * rewritable with `next({ ...e, text })`.
+       *
+       * The `<system-reminder>` wrapper (or the system channel that replaces
+       * it) goes around what the chain answers, never inside it.
+       */
+      text: string;
+      /**
+       * Who authored the text (PromptAttachmentOrigin): the engine, a settings
+       * hook, or a plugin's chain context.
+       *
+       * Pinned: a different value is refused, one left out is kept.
+       */
+      origin: PromptAttachmentOrigin;
+      /**
+       * The loop whose request carries the attachment: a subagent's id, the
+       * `id` `$.agent.list()` gives it; absent on main.
+       *
+       * Pinned: a different value is refused, one left out is kept. A loop
+       * forked from another carries the rows made for that one.
+       */
+      agentId?: string;
+      /**
+       * Facts of the row the engine computed as it rendered `text`, by `type`:
+       * what a hook with words of its own reads in place of the engine's.
+       *
+       * Pinned: a different value is refused, one left out is kept. Not all
+       * the text says: a host's own plan instructions are in `text` alone.
+       * Absent on a row that does not hold its facts.
+       *
+       * @example
+       * if (e.detail === undefined) return next(e)
+       */
+      detail?: PromptAttachmentDetailOf[K];
+  };
+
+  /**
    * The state events of each declared value in a union of `[plugin, key]`
    * pairs, one variant per pair (it distributes), so a matcher narrows `e`.
    */
@@ -3809,7 +3862,7 @@ declare module 'claude-code' {
        * that too while the box holds text or a turn runs.
        *
        * @example
-       * on("prompt.suggest", { origin: { kind: "suggestion" } }, hide)
+       * on("prompt.suggest", () => ({ isShown: false }))
        */
       'prompt.suggest': PromptSuggestInput;
       /**
@@ -3821,7 +3874,7 @@ declare module 'claude-code' {
        * coming up; `{ text: e.text, cursor: e.cursor }` without `next` consumes.
        *
        * @example
-       * on("prompt.edit", ($, e, next) => next({ ...e, inputText: up(e) }))
+       * on("prompt.edit", ($, e) => ({ text: e.text, cursor: e.cursor }))
        */
       'prompt.edit': PromptEditInput;
       /**
@@ -3852,12 +3905,9 @@ declare module 'claude-code' {
        * Fires when the engine renders a system prompt; `next(e)` resolves to
        * `{ sections }`, each `{ id, text, scope }`, in the order they are sent.
        *
-       * The bottom is the engine's own composition: its ids depend on the prompt
-       * it composes (`lean`, `bare` in `e.traits`), so read them off what `next(e)`
-       * answered. Append, replace, reorder or drop; with no `next`, replace it all.
-       *
-       * @example
-       * on("prompt.compose", async ($, e, next) => added(await next(e), POLICY))
+       * The ids depend on the prompt composed (`lean`, `bare` in `e.traits`): read
+       * them off `next(e)`. Append (as `session`), replace, reorder or drop; a list
+       * with a `shared` section after a `session` one skips the hook.
        */
       'prompt.compose': PromptComposeInput;
       /**
@@ -5068,6 +5118,14 @@ declare module 'claude-code' {
   }[keyof P];
 
   /**
+   * An object with the declared keys of `T` and no other: its string and
+   * number index signatures are left out. What KnownKeys reads the keys of.
+   */
+  type IndexFree<T> = {
+      [K in keyof T as string extends K ? never : number extends K ? never : K]: 0;
+  };
+
+  /**
    * The props of `Input`, every surface's one-line text field: an address,
    * optional texts, and the closures a change and a submit run. A leaf.
    *
@@ -5178,7 +5236,7 @@ declare module 'claude-code' {
    * is left out of the selection so that it cannot defeat the narrowing the
    * other keys give.
    */
-  type IsDiscriminant<I, K> = I extends unknown ? K extends KnownKeys<I> ? IsSingleLiteral<I[K]> : true : never;
+  type IsDiscriminant<I, K> = I extends unknown ? K extends KnownKeys<I> ? IsSingleLiteral<I[K & keyof I]> : true : never;
 
   /**
    * Whether `V` is made of literals only: `"a" | "b"` is, `string` is not.
@@ -5223,10 +5281,12 @@ declare module 'claude-code' {
 
   /**
    * The declared keys of `T`, the string and number index signatures left out.
+   *
+   * A type with an index signature is mapped to be rid of it (IndexFree); any
+   * other is read as it stands, which costs nothing per key. A key of these
+   * indexes `T` as `T[K & keyof T]`.
    */
-  type KnownKeys<T> = keyof {
-      [K in keyof T as string extends K ? never : number extends K ? never : K]: 0;
-  };
+  type KnownKeys<T> = keyof (string extends keyof T ? IndexFree<T> : number extends keyof T ? IndexFree<T> : T);
 
   /**
    * The events whose overload must come after the rest, lest it shadow them.
@@ -5359,10 +5419,14 @@ declare module 'claude-code' {
   /**
    * The events a matched registration on `P` covers: the event named, or for a
    * glob every selected event whose input has each key the matcher names.
+   *
+   * Settled by `infer`: while `P` is open the compiler reads them as EventName
+   * and selects nothing; a type keyed by them is worked out once, for the `P`
+   * a registration gives.
    */
-  type MatchedNames<P, M = never> = P extends EventName ? P : {
+  type MatchedNames<P, M = never> = (P extends EventName ? P : {
       [N in Selected<P & string>]: [M] extends [never] ? N : keyof M extends AnyKeyOf<Args<N>> ? N : never;
-  }[Selected<P & string>];
+  }[Selected<P & string>]) extends infer Names extends EventName ? Names : never;
 
   /**
    * What a matched hook returns: the event's result, narrowed by `M` where the
@@ -5399,7 +5463,7 @@ declare module 'claude-code' {
    * a type error where `e` is typed and free where it is `unknown`.
    */
   export type Matcher<I, All = I> = I extends unknown ? {
-      readonly [K in KnownKeys<I>]?: MatcherValue<I[K], MatcherValueOf<All, K>>;
+      readonly [K in KnownKeys<I>]?: MatcherValue<I[K & keyof I], MatcherValueOf<All, K>>;
   } & (string extends keyof I ? OpenMatcher<I, All> : unknown) : never;
 
   /**
@@ -5413,6 +5477,16 @@ declare module 'claude-code' {
   type MatcherData = string | number | boolean | null | RegExp | readonly MatcherData[] | {
       readonly [key: string]: MatcherData;
   };
+
+  /**
+   * The matcher type per pattern: a Matcher of the `e` of the event named, or
+   * of each event a glob or a negation selects.
+   *
+   * Settled by `infer`: while `P` is open the bound reads as `unknown`; once
+   * `P` is known it is that Matcher exactly. A mistake on a name is refused
+   * where it is written; a pattern takes what any event it selects takes.
+   */
+  type MatcherFor<P extends Pattern> = Matcher<Args<MatchedNames<P>>> extends infer Settled ? Settled : never;
 
   /**
    * The declared keys of every variant of `I` (index signatures aside).
@@ -5440,9 +5514,34 @@ declare module 'claude-code' {
   type MatcherValue<V, Across = V> = MatcherOne<V> | readonly MatcherOne<Across>[];
 
   /**
-   * The type of key `K` across the variants of `I` that declare it.
+   * The type of key `K` across the variants of `I` that declare it, read
+   * variant by variant: what MatcherValueOf reads for a key as wide as `symbol`.
    */
-  type MatcherValueOf<I, K> = I extends unknown ? K extends KnownKeys<I> ? I[K] : never : never;
+  type MatcherValueAcross<I, K> = I extends unknown ? K extends KnownKeys<I> ? I[K & keyof I] : never : never;
+
+  /**
+   * The type of key `K` across the variants of `I` that declare it: one read
+   * of their table by key (MatcherValues), for a key some variant declares.
+   *
+   * A key as wide as `symbol` is an index signature's, which the table's own
+   * would meet with `never`: it is read variant by variant. While `I` is open
+   * the table is left unmade, since the variants of `I` are what it is made of.
+   */
+  type MatcherValueOf<I, K> = [I] extends [unknown] ? symbol extends K ? MatcherValueAcross<I, K> : MatcherValues<I>[K & PropertyKey] : never;
+
+  /**
+   * The type of each declared key of `I` across the variants that declare it,
+   * as one table by key: made once per `I`, then read at a key.
+   *
+   * Each variant gives an entry per key it declares; the entries of one key
+   * fall into one property, their values a union. Read at a key some variant
+   * declares.
+   */
+  type MatcherValues<I> = {
+      [Entry in I extends unknown ? {
+          [K in KnownKeys<I>]-?: [key: K, value: I[K & keyof I]];
+      }[KnownKeys<I>] : never as Entry[0]]: Entry[1];
+  } & Record<PropertyKey, never>;
 
   /**
    * Why `$.mcp.connect` left a server unconnected, in one word.
@@ -5536,8 +5635,8 @@ declare module 'claude-code' {
    * The `e` a `tool.call` (or `classic.PreToolUse`) hook receives for an MCP
    * tool while no MCP tool is declared: every `mcp__*` name, loose arguments.
    *
-   * McpToolInputs has no entries until `/plugin-types` writes the connected
-   * tools' declarations; also the `input` of `$.tool.call({ tool:
+   * McpToolInputs has no entries until a type root's MCP entry declares the
+   * connected tools; also the `input` of `$.tool.call({ tool:
    * "mcp__<server>__<tool>", ... })`. Not `$.mcp.call`'s, which is positional:
    *
    * @example
@@ -5561,9 +5660,9 @@ declare module 'claude-code' {
    * The inputs of the MCP tools this project knows, keyed by full tool name,
    * for declaration merging; empty by default, then every MCP tool is loose.
    *
-   * A `.d.ts` in the plugin author's project (written by `/plugin-types <dir>`
-   * from the connected servers' JSON Schemas, or by hand) adds entries under
-   * `declare module "claude-code"`; `e.tool === <name>` then narrows to them.
+   * A `.d.ts` in the author's project (the type root's MCP entry, laid from
+   * the connected servers' JSON Schemas, or one written by hand) adds entries
+   * under `declare module "claude-code"`; `e.tool === <name>` narrows to them.
    *
    * @example
    * interface McpToolInputs { "mcp__my_server__send": { to: string } }
@@ -6220,7 +6319,7 @@ declare module 'claude-code' {
    */
   export type On = {
       <P extends Pattern>(pattern: P, hook: NoInfer<HookFor<P>>): Registration<HookFor<P>>;
-      <P extends Pattern, const M extends Matcher<Args<MatchedNames<P>>>>(pattern: P, matcher: M, hook: NoInfer<MatchedHook<P, M>>): Registration<MatchedHook<P, M>>;
+      <P extends Pattern, const M extends MatcherFor<P>>(pattern: P, matcher: M, hook: NoInfer<MatchedHook<P, M>>): Registration<MatchedHook<P, M>>;
   };
 
   /**
@@ -6264,7 +6363,7 @@ declare module 'claude-code' {
    * refused on every variant, not admitted by the open one.
    */
   type OpenMatcher<I, All> = {
-      readonly [K in Exclude<MatcherKeys<All>, KnownKeys<I>>]?: MatcherValue<MatcherValueOf<All, K>>;
+      readonly [K in Exclude<MatcherKeys<All>, keyof IndexFree<I>>]?: MatcherValue<MatcherValueOf<All, K>>;
   } & Readonly<Record<string, unknown>>;
 
   /**
@@ -6964,6 +7063,56 @@ declare module 'claude-code' {
   type PermissionUpdates = NonNullable<ClassicHookInputs['PermissionRequest']['permission_suggestions']>;
 
   /**
+   * What the engine knew as it made a plan-mode reminder: which of its two
+   * wordings the row carries, where the plan is kept, whether one is there.
+   */
+  type PlanModeDetail = {
+      /**
+       * Which wording the row carries: `full`, the whole workflow, or `sparse`,
+       * the one line that restates it between two full ones.
+       *
+       * A row made for a subagent reads the same under either.
+       */
+      reminder: 'full' | 'sparse';
+      /**
+       * Where the plan is kept, as the text names it: the file the model
+       * writes its plan to, of the loop the row was made for.
+       */
+      planFilePath: string;
+      /**
+       * True when the engine found that file as it made the row.
+       */
+      hasPlan: boolean;
+  };
+
+  /**
+   * What the engine knew as it made the note that plan mode has ended:
+   * where the plan is kept, whether one is there.
+   */
+  type PlanModeExitDetail = {
+      /**
+       * Where the plan is kept; the text names it only when `hasPlan`.
+       */
+      planFilePath: string;
+      /**
+       * True when the engine found that file as it made the row.
+       */
+      hasPlan: boolean;
+  };
+
+  /**
+   * What the engine knew as it made the note that plan mode is entered
+   * again: where the plan of the earlier planning is kept.
+   */
+  type PlanModeReentryDetail = {
+      /**
+       * Where the earlier plan is kept, as the text names it; the note is made
+       * only when the engine finds that file.
+       */
+      planFilePath: string;
+  };
+
+  /**
    * How `$.audio.play` plays a clip: looped until `signal` aborts, or once.
    *
    * A loop needs the signal that ends it; a single play takes one as an option.
@@ -7482,48 +7631,51 @@ declare module 'claude-code' {
   };
 
   /**
+   * The facts `prompt.attachment` pins under `e.detail`, by attachment type:
+   * what the engine computed for the row, as it rendered the row's text.
+   *
+   * A type named here carries them on every row the engine made; a type not
+   * named carries no `detail` at all. Read off the row, never computed again:
+   * a row sent in a later request says what it was made with.
+   */
+  export type PromptAttachmentDetailOf = {
+      /**
+       * The reminder a request carries while plan mode is on: `full` the first
+       * of a planning session and after a compaction, `sparse` most others.
+       *
+       * @example
+       * const isSparse = e.detail?.reminder === "sparse"
+       */
+      plan_mode: PlanModeDetail;
+      /**
+       * The note made when plan mode is entered again by the process that left
+       * it, the earlier plan still in its file; it precedes the reminder.
+       *
+       * @example
+       * const planFilePath = e.detail?.planFilePath
+       */
+      plan_mode_reentry: PlanModeReentryDetail;
+      /**
+       * The note made once when plan mode has ended: the model may act again,
+       * and is told where its plan is when there is one.
+       *
+       * @example
+       * const hasPlan = e.detail?.hasPlan === true
+       */
+      plan_mode_exit: PlanModeExitDetail;
+  };
+
+  /**
    * The input of `prompt.attachment`: one message the engine injects into the
    * conversation for the model on its own, as a request is about to carry it.
    *
    * A reminder, a mode transition, a listing, a mentioned file, a hook's
-   * context: the person never typed it and mostly never sees it. Only an
-   * attachment that carries text for the model is raised.
+   * context: only one that carries text for the model is raised. A union on
+   * `type`: a name PromptAttachmentDetailOf declares carries its `detail`.
    */
   export type PromptAttachmentInput = {
-      /**
-       * As the engine names the attachment's kind; the key a matcher narrows on.
-       * Pinned. Builds add and retire kinds: match by name.
-       *
-       * Among them `todo_reminder`, `plan_mode`, `plan_mode_exit`, `auto_mode`,
-       * `auto_mode_exit`, `instructions`, `nested_memory`, `skill_listing`,
-       * `deferred_tools_delta`, `edited_text_file`, `file`, `queued_command`.
-       */
-      type: string;
-      /**
-       * What the model reads for this attachment, inside the engine's framing;
-       * rewritable with `next({ ...e, text })`.
-       *
-       * The `<system-reminder>` wrapper (or the system channel that replaces it)
-       * goes around what the chain answers, never inside it. An attachment
-       * rendered as several text blocks hands them joined by newlines.
-       */
-      text: string;
-      /**
-       * Who authored the text (PromptAttachmentOrigin): the engine, a settings
-       * hook, or a plugin's chain context.
-       *
-       * Pinned: a different value is refused, one left out is kept.
-       */
-      origin: PromptAttachmentOrigin;
-      /**
-       * The loop whose request carries the attachment: a subagent's id, the `id`
-       * `$.agent.list()` gives it and its `tool.call`s carry; absent on main.
-       *
-       * Pinned: a different value is refused, one left out is kept. A subagent
-       * a hook spawned through `$.agent.spawn` is resolved past that hook.
-       */
-      agentId?: string;
-  };
+      [K in keyof PromptAttachmentDetailOf]: DeclaredAttachmentInput<K>;
+  }[keyof PromptAttachmentDetailOf] | UndeclaredAttachmentInput;
 
   /**
    * Who authored the text an injected attachment carries, as the engine knows
@@ -7650,12 +7802,9 @@ declare module 'claude-code' {
    * Which side of the prompt cache's boundary a section of the system prompt
    * sits on: `shared` before it, `session` after it.
    *
-   * `shared` is text that reads the same for every person on this build and
-   * model: it is sent in the block the API may cache across organizations.
-   * `session` is text that varies with the person, the machine or the session.
-   *
-   * The engine places the one boundary and every cache marker itself,
-   * whatever a list says; `shared` text that varies hits that cache for nobody.
+   * `shared` text reads the same for everyone on this build and model: the API
+   * may cache it across organizations, and text that varies hits that cache for
+   * nobody. `session` text varies. In a list every `shared` section comes first.
    */
   export type PromptComposeScope = 'shared' | 'session';
 
@@ -7664,7 +7813,7 @@ declare module 'claude-code' {
    * id, the text the model reads, and the side of the cache boundary it is on.
    *
    * @example
-   * const POLICY = { id: "acme:policy", text: "# Policy\n...", scope: "session" }
+   * const POLICY = { id: "acme:policy", text: "...", scope: "session" } as const
    */
   export type PromptComposeSection = {
       /**
@@ -7681,6 +7830,12 @@ declare module 'claude-code' {
        * boundary are joined by a blank line, in the list's order.
        */
       text: string;
+      /**
+       * The side of the cache boundary the section is sent on; in one list
+       * every `shared` section comes before every `session` one.
+       *
+       * A section added at the end of what `next(e)` answered is `session`.
+       */
       scope: PromptComposeScope;
   };
 
@@ -9597,7 +9752,7 @@ declare module 'claude-code' {
    * flattened, RegExps widened to `unknown`.
    */
   type Selection<I, M> = {
-      [K in keyof M & TagKeys<I>]: Literal<M[K] extends readonly (infer One)[] ? One : M[K]>;
+      [K in keyof M & TagKeys<I, keyof M>]: Literal<M[K] extends readonly (infer One)[] ? One : M[K]>;
   };
 
   /**
@@ -11419,12 +11574,13 @@ declare module 'claude-code' {
   };
 
   /**
-   * The keys of `I` a matcher may select variants by: literal-valued in every
-   * variant, and one literal per variant (IsDiscriminant).
+   * The keys among `Among` a matcher may select variants of `I` by: valued by
+   * literals in every variant, one literal per variant (IsDiscriminant).
+   *
+   * Asked of each key given and of no other: of a matcher's own keys, never
+   * of every key of every variant.
    */
-  type TagKeys<I> = {
-      [K in MatcherKeys<I>]: IsLiteralValued<MatcherValueOf<I, K>> extends true ? IsDiscriminant<I, K> extends true ? K : never : never;
-  }[MatcherKeys<I>];
+  type TagKeys<I, Among> = Among extends MatcherKeys<I> ? IsLiteralValued<MatcherValueOf<I, Among>> extends true ? IsDiscriminant<I, Among> extends true ? Among : never : never : never;
 
   /**
    * A tier `next.to(e, tier)` may name: one a floor can reach past a tier of
@@ -13328,6 +13484,54 @@ declare module 'claude-code' {
        * What the handler received: the option's value as the chain left it.
        */
       value: string;
+  };
+
+  /**
+   * One `prompt.attachment` input of every other type, the ones
+   * PromptAttachmentDetailOf does not name: the attachment's text alone.
+   */
+  type UndeclaredAttachmentInput = {
+      /**
+       * As the engine names the attachment's kind; the key a matcher narrows on.
+       * Pinned. Builds add and retire kinds: match by name.
+       *
+       * Among them `todo_reminder`, `auto_mode`, `auto_mode_exit`, `instructions`,
+       * `nested_memory`, `skill_listing`, `deferred_tools_delta`, `file`,
+       * `edited_text_file`, `queued_command`; the plan rows carry a `detail`.
+       */
+      type: string;
+      /**
+       * What the model reads for this attachment, inside the engine's framing;
+       * rewritable with `next({ ...e, text })`.
+       *
+       * The `<system-reminder>` wrapper (or the system channel that replaces it)
+       * goes around what the chain answers, never inside it. An attachment
+       * rendered as several text blocks hands them joined by newlines.
+       */
+      text: string;
+      /**
+       * Who authored the text (PromptAttachmentOrigin): the engine, a settings
+       * hook, or a plugin's chain context.
+       *
+       * Pinned: a different value is refused, one left out is kept.
+       */
+      origin: PromptAttachmentOrigin;
+      /**
+       * The loop whose request carries the attachment: a subagent's id, the `id`
+       * `$.agent.list()` gives it and its `tool.call`s carry; absent on main.
+       *
+       * Pinned: a different value is refused, one left out is kept. A subagent
+       * a hook spawned through `$.agent.spawn` is resolved past that hook.
+       */
+      agentId?: string;
+      /**
+       * Absent, the key itself: the engine declares no facts for the type, and
+       * a rewrite that adds the key is refused.
+       *
+       * @example
+       * if (!("detail" in e)) return next(e)
+       */
+      detail?: undefined;
   };
 
   /**
