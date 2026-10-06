@@ -12,7 +12,7 @@ session says something when one lands.
 
 It is here because of what it is built on rather than what it does: Claude Code v2.1.269 shipped a plugin runtime, mods, that no page of `code.claude.com/docs` mentioned until Anthropic published [their mods docs](https://code.claude.com/docs/en/plugins/mods/overview) with v2.1.287. Nothing in the 192-page docs corpus captured on 2026-09-11 named `modules`, `surface`, `$.ui.render` or any of it.
 
-The build documents itself as well. Each time it loads a mod from a folder you own, it writes `.claude-plugin/types/claude-code/index.d.ts` beside it: 586 KB of declarations, every event's input and result, every method on `$`, every element's props. `types/claude-code.d.ts` here is the copy v2.1.291 wrote. **It is the authority; the notes below are the map to it.**
+The build documents itself as well. Each time it loads a mod from a folder you own, it writes `.claude-plugin/types/claude-code/index.d.ts` beside it: 597 KB of declarations, every event's input and result, every method on `$`, every element's props. `types/claude-code.d.ts` here is the copy v2.1.292 wrote. **It is the authority; the notes below are the map to it.**
 
 The site it reads is [changelogs.core-directive.com](https://changelogs.core-directive.com).
 
@@ -365,11 +365,11 @@ walk rather than a download.
 
 ## The types
 
-`types/claude-code.d.ts` is the plugin API itself: 586 KB of declarations
+`types/claude-code.d.ts` is the plugin API itself: 597 KB of declarations
 covering every event's input and result, every method on `$`, and every
 element's props. **It is the authority and this README is the map to it.**
 
-Nobody wrote it. Claude Code writes it out of the running build beside every mod it loads from a folder you own (up to v2.1.286 you typed `/plugin-types` for it), and the copy here is what 2.1.291 wrote. It is early access and may move between releases without notice, so regenerate against your own build rather than trusting this file's age. `types/README.md` has how, and the
+Nobody wrote it. Claude Code writes it out of the running build beside every mod it loads from a folder you own (up to v2.1.286 you typed `/plugin-types` for it), and the copy here is what 2.1.292 wrote. It is early access and may move between releases without notice, so regenerate against your own build rather than trusting this file's age. `types/README.md` has how, and the
 terms it is published under, which are not this repository's MIT.
 
 ## Caveats

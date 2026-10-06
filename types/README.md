@@ -3,15 +3,15 @@
 
 # claude-code.d.ts
 
-586 KB of TypeScript declarations for Claude Code's function-hooks plugin
+597 KB of TypeScript declarations for Claude Code's function-hooks plugin
 runtime: every event's input and result, every noun and method on `$`, every
 element each surface draws and the props it takes.
 
 ## Where it came from
 
-Nobody wrote it. Claude Code writes it, from the build you are running, each time it loads a mod from a folder you own, beside that mod as `.claude-plugin/types/claude-code/index.d.ts`. Up to 2.1.286 you typed `/plugin-types` in a session for it, and that command is gone at 2.1.287. The copy here is what build **2.1.291** ships, read out of its binary on 2026-10-05 (the same text the engine writes, with the version line it adds), and its own header opens:
+Nobody wrote it. Claude Code writes it, from the build you are running, each time it loads a mod from a folder you own, beside that mod as `.claude-plugin/types/claude-code/index.d.ts`. Up to 2.1.286 you typed `/plugin-types` in a session for it, and that command is gone at 2.1.287. The copy here is what build **2.1.292** ships, read out of its binary on 2026-10-06 (the same text the engine writes, with the version line it adds), and its own header opens:
 
-> Written by Claude Code 2.1.291.
+> Written by Claude Code 2.1.292.
 > EARLY ACCESS: this surface may change between releases without notice.
 
 It was checked in because a plugin is no use to anybody who cannot see the API it is written against, and at the time this was published no page of `code.claude.com/docs` mentioned the runtime at all. Not one of the 192 documentation pages captured on 2026-09-11 names `modules`, `surface`, `$.ui.render` or `register`. Anthropic published [their mods docs](https://code.claude.com/docs/en/plugins/mods/overview) with 2.1.287, and [Create a mod](https://code.claude.com/docs/en/plugins/mods/create) lists every file the engine writes into `.claude-plugin/types/`.
