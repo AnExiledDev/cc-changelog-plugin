@@ -1,4 +1,4 @@
-// Written by Claude Code 2.1.326.
+// Written by Claude Code 2.1.327.
 // Claude Code function hooks: the plugin API's TypeScript declarations.
 //
 // EARLY ACCESS: this surface may change between releases without notice.
@@ -9153,8 +9153,8 @@ declare module 'claude-code' {
        */
       name: string;
       /**
-       * Where its hooks would stand among the chain's tiers (Tier); never
-       * `core`, the engine's own.
+       * The tier it is judged in (Tier), which for a hooks module is where its hooks
+       * would stand in the chain; never `core`, the engine's own.
        */
       tier: Exclude<Tier, 'core'>;
       /**
@@ -9173,8 +9173,9 @@ declare module 'claude-code' {
       provenance: string;
       /**
        * True where the app that started this session handed over this plugin by path
-       * and said its organization requires it; else absent. Only that app says it, and
-       * it gives the plugin no tier or permission. Left out, it is restored.
+       * and said its organization requires or auto-installs it; else absent. Only that app
+       * says it. It gives no permission, and sets `tier` only for a plugin with no hooks
+       * module (Tier). Left out, it is restored.
        */
       requiredByOrganization?: true;
       /**
@@ -16304,22 +16305,23 @@ declare module 'claude-code' {
    * One of the chain's five tiers (TIERS), outermost first; on every
    * `next.trace` entry, and what `next.to(e, tier)` names.
    *
-   * `prepend` and `append` are the managed plugins an administrator lists. With
+   * `prepend` and `append` are the plugins an administrator manages. With
    * no managed settings, they are a person's own plugins listed in user settings,
    * except where plugin-authoring's reference says that list is set aside. `user`
    * is every other plugin a person installs, `builtin` the plugins bundled in the
    * binary, `core` the engine's innermost link. `--safe-mode` and `--bare` keep
    * an organization's tiers: they turn off what a person installed.
    *
-   * Under an organization's managed settings, a mod from a marketplace with a
+   * Under an organization's managed settings, a plugin from a marketplace with a
    * remote source (`github`, `git`, `url` or inline `settings`) takes the
-   * organization's tier when those settings do three things: set it true in
-   * `enabledPlugins`, declare that marketplace in `extraKnownMarketplaces`, and
-   * list it in `prependPlugins` or `appendPlugins`. Missing any of the three, it
-   * stays in `user`. A marketplace's `pluginDigests` is deprecated and ignored, so
+   * organization's tier, with a hooks module or without, when those settings set
+   * it true in `enabledPlugins` and declare that marketplace in
+   * `extraKnownMarketplaces`. Missing either, it stays in `user`. `prependPlugins`
+   * and `appendPlugins` set the order: in neither, it is `prepend`, after the
+   * listed ones. A marketplace's `pluginDigests` is deprecated and ignored, so
    * a new release reaches machines with no settings change.
    *
-   * Claude Code stores a hash (`copyHash`) on a listed mod's install record when it
+   * Claude Code stores a hash (`copyHash`) on such a plugin's install record when it
    * writes a copy from the marketplace's declared origin that fits this build, and
    * checks the copy against it at each load, so an edit made after that is caught.
    * A copy that doesn't match is fetched afresh once before the first turn. Some
@@ -16330,6 +16332,24 @@ declare module 'claude-code' {
    * says `listed mod <id> does not run in this session: <why>`. A copy that doesn't
    * match runs without its hooks module, and a copy outside its
    * `engines["claude-code"]` range is off whole.
+   *
+   * That is a listed mod's road. An unlisted plugin's version moves only by an
+   * update, and no start waits on a fetch for it: with no hash yet, or a copy that
+   * doesn't match, it runs in `user`, module included. Behind the start, the commit
+   * its record names is fetched and compared with its folder. The same files earn
+   * the hash, and the tier at the next start or reload. A folder that differs (an
+   * edit, a file the plugin wrote there) is never repaired: it stays in `user` until
+   * an update or a reinstall. So does one whose record names no commit, or one its
+   * marketplace's `ref` does not hold, or that comes from a repository of its own.
+   * A fetch that fails is tried again a day later, and so is a folder that changed
+   * and still differs. A one-shot `-p` run and essential-traffic mode fetch nothing.
+   * Ahead of every check, the `__pycache__` folders in a cached copy are removed.
+   *
+   * A plugin `plugin.register` marks `requiredByOrganization` is judged there in the
+   * organization's tier when it has no hooks module and is shown to be outside every
+   * dev-mods folder and what a link in one leads to (a zip by where it is unpacked).
+   * Nothing proves that mark, so it goes no further: it moves neither a module's
+   * tier nor the tier an event's `provider` reads.
    */
   export type Tier = (typeof TIERS)[number];
 
@@ -16411,8 +16431,12 @@ declare module 'claude-code' {
    * of which the tool sees (the engine strips them before the tool runs).
    *
    * `consent` is the person's own words for the press that raised the call
-   * (`The user pressed "1: Yes" on ...`): the run's context carries it as a human
-   * turn, which the permission path reads as the user's request.
+   * (`The user pressed "1: Yes" on ...`). It joins the run's context as a human
+   * turn, which the permission path reads as the user's request, only when the
+   * call answers the person's press, input or pick on this plugin's own element
+   * (not one in a desktop `Client`): made by that element's closure, or by this
+   * plugin's hook on that event, before it returns or times out, with no Stop
+   * standing since the gesture. Any other call runs as it would without `consent`.
    */
   export type ToolCallReserved<T> = {
       tool: T;
