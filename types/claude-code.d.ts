@@ -1,4 +1,4 @@
-// Written by Claude Code 2.1.328.
+// Written by Claude Code 2.1.329.
 // Claude Code function hooks: the plugin API's TypeScript declarations.
 //
 // EARLY ACCESS: this surface may change between releases without notice.
@@ -447,6 +447,87 @@ declare module 'claude-code' {
   export type AgentOfferResult = {
       isOffered: boolean;
   };
+
+  /**
+   * The input of `agent.report`: one report of an agent, before it reaches
+   * the loop that waits for it.
+   *
+   * `text` is the hook's to rewrite; the rest is pinned.
+   */
+  export type AgentReportInput = {
+      /**
+       * The agent whose report this is, as `agent.spawn` answered it.
+       */
+      agentId: string;
+      /**
+       * The agent the report is for; absent when it is for the main conversation.
+       */
+      parentAgentId?: string;
+      /**
+       * The agent's type (`Explore`, `fork`, a plugin's agent).
+       */
+      subagentType: string;
+      /**
+       * Who provides this agent, as `agent.spawn`'s `provider` says; for a forked
+       * skill or command, who provides that.
+       */
+      provider: Origin;
+      /**
+       * How the run ended; a report handed back by the tool is `completed`.
+       */
+      status: 'completed' | 'failed' | 'stopped';
+      /**
+       * The report: the run's final text or the hand-back tool's message, and
+       * of a run that failed or was stopped what it had written so far.
+       *
+       * Empty where the parent is told only of the error or the stop. Where an
+       * agent owed a hand-back and made none, the engine's note saying so.
+       */
+      text: string;
+  };
+
+  /**
+   * What an `agent.report` hook returns and what `next(e)` resolves to: the
+   * text to deliver with the report's review, or `{ consumed: reason }`.
+   *
+   * `next(e)` delivers nothing: the engine delivers what the outermost hook
+   * returns.
+   */
+  export type AgentReportResult = {
+      /**
+       * The report to deliver; from core, `e.text` exactly as passed.
+       */
+      text: string;
+      /**
+       * The review of the report as the agent wrote it, whatever `text` is now.
+       * Core's alone: absent where a hook beneath answered without `next`.
+       */
+      review?: AgentReportReview;
+      /**
+       * What the parent reads above the report where `review` is `flagged`,
+       * `refused` or `unavailable`. Core's alone.
+       */
+      warning?: string;
+      consumed?: undefined;
+  } | {
+      /**
+       * Takes the report, before or after `next`: the parent gets no notice
+       * and waits no longer. The reason is logged, the plugin named.
+       */
+      consumed: string;
+      text?: undefined;
+      review?: undefined;
+      warning?: undefined;
+  };
+
+  /**
+   * What auto mode's hand-off review made of a report.
+   *
+   * `cleared`, `flagged`: its verdict. `refused`, `unavailable`: it gave none,
+   * refused or out of reach. `none`: auto mode, and it had no review to give.
+   * `off`: the mode runs no such review.
+   */
+  export type AgentReportReview = 'cleared' | 'flagged' | 'refused' | 'unavailable' | 'none' | 'off';
 
   /**
    * One request of an agent's loop (a `turn.step`'s) as it went out, past caps,
@@ -1160,7 +1241,8 @@ declare module 'claude-code' {
   export type BoxHoverProps = {
       /**
        * Names a hover group of this plugin's: every element it draws with the
-       * same `scope`, in any site, lights while any is hovered, reveals included.
+       * same `scope`, in any site but a `Backdrop`, lights while any is hovered,
+       * reveals included.
        *
        * A Pane row and a mark on a transcript message can share one. Another
        * plugin's elements under the same string are a different group. One to
@@ -2995,12 +3077,16 @@ declare module 'claude-code' {
            * as SVG.
            * `colors` is a theme for a surface to paint itself with, where it reads
            * one. With no scene, no `ui.render` hook is asked to draw.
+           * `sound` is what the desktop app plays once the person turns it on.
+           * `style` is how the desktop app draws messages and tool calls' rows.
            * Display only: `--resume` brings none back and a plugin that unloads
            * takes its own with it, so set it at `session.start`.
            *
            * @param attributes `backdrop`: a scene, `scene` and `glass` (`blur`, `tint`,
            *   `opacity`) or `false`, or a still ground, see `ThemeGround`;
-           *   `overrideColorScheme` (`light` or `dark`); `colors`: a whole palette
+           *   `overrideColorScheme` (`light` or `dark`); `colors`: a whole palette;
+           *   `sound`: an ambience and cues, see `ThemeSound`; `style`: a rule for
+           *   each part of the conversation, see `ThemeStyle`
            * @returns `{ isDrawn: true, requestId }`, or `isDrawn: false` and why
            * @example
            * await $.theme.set({ backdrop: { scene: "lagoon", glass: { blur: 14, opacity: 0.55 } } })
@@ -4987,6 +5073,36 @@ declare module 'claude-code' {
        */
       'agent.spawn': AgentSpawnInput;
       /**
+       * Fires before an agent's report reaches its parent, for each run that ends
+       * or is stopped. `next(e)` answers auto mode's review and delivers nothing.
+       *
+       * What the outermost hook returns is delivered: `{ text }`, under the review's
+       * warning if it gave one. `{ consumed: reason }` takes it: the parent gets no
+       * notice and waits no longer, and a call that waited answers the reason.
+       *
+       * @remarks What the agent wrote is reviewed once, as with no hook, and with
+       *   no `next` all the same; a hook's text is not. A `review` or `warning` a
+       *   hook writes is dropped. A warning goes with whatever text is delivered;
+       *   of a consumed report, with the agent's next one in this process.
+       * @remarks A hook that throws is skipped as on any event: before its `next`
+       *   the report goes on without it, after it what `next` answered is delivered.
+       * @remarks Final text is seen before it is reviewed; the hand-back tool's
+       *   message after the call's own verdict, which `next` answers. A run that
+       *   failed or was stopped in the background has no review: `none`.
+       * @remarks Each report is asked about anew, a first run's or a resumed one's.
+       *   A run that only waits on agents of its own reports once they have; left
+       *   none by a consume, it ends as its last turn left it, with no further one.
+       * @remarks The engine stops naming a consumed report's output file. A model's
+       *   own Read of that file, a script's read of the transcript, the agent itself
+       *   when resumed and SubagentStop hooks still see it.
+       * @remarks Not raised for a workflow's `agent()`, a teammate (see
+       *   `session.receive`), a remote agent, an observer, or a run with hooks off.
+       * @example
+       * on("agent.report", { subagentType: "lab:runner" }, async ($, e, next) =>
+       *   (await $.store.set(e.agentId, await next(e)), { consumed: "kept" }))
+       */
+      'agent.report': AgentReportInput;
+      /**
        * Fires when a prompt is submitted, before the turn starts. `next(e)` runs
        * the hooks beneath and the UserPromptSubmit settings hooks, then it enters.
        *
@@ -5156,12 +5272,13 @@ declare module 'claude-code' {
        *   passes the tool through. A command that sends the conversation ahead of
        *   a turn (`/compact`, `/btw`) asks first, as the loop.
        * @remarks The hand-back tool is asked at each run; not offered, the agent's
-       *   final text is its report. Where the server decides auto mode's checks it
-       *   is not asked, and stays offered. StructuredOutput and EndConversation
-       *   are never asked, nor is a list for the loops the engine runs for itself
-       *   (an agent hook's, a compaction's). A Batch tool follows the tool it
-       *   batches. ToolSearch, not offered, is left out while no offered tool is
-       *   deferred, and is there to load one that is; it finds no hidden tool.
+       *   final text is its report. Where the server decides auto mode's checks and
+       *   cannot be handed that text, it is not asked, and stays offered.
+       *   StructuredOutput and EndConversation are never asked, nor is a list for
+       *   the loops the engine runs for itself (an agent hook's, a compaction's). A
+       *   Batch tool follows the tool it batches. ToolSearch, not offered, is left
+       *   out while no offered tool is deferred, and is there to load one that is;
+       *   it finds no hidden tool.
        * @example
        * on("tool.offer", { tool: "Agent" }, ($, e) => ({ isOffered: !e.agentId }))
        */
@@ -5549,6 +5666,10 @@ declare module 'claude-code' {
        */
       'agent.spawn': AgentSpawnResult;
       /**
+       * `{ text, review, warning? }` (the report to deliver) or `{ consumed }`.
+       */
+      'agent.report': AgentReportResult;
+      /**
        * `{ text, context? }` or `{ drop }`.
        */
       'prompt.submit': PromptSubmitResult;
@@ -5761,6 +5882,7 @@ declare module 'claude-code' {
       agent: {
           offer: (input: AgentOfferInput) => Promise<AgentOfferResult>;
           spawn: (input: AgentSpawnArgs) => Promise<AgentSpawnResult>;
+          report: (input: AgentReportInput) => Promise<AgentReportResult>;
       };
       session: {
           start: (input: SessionStartInput) => Promise<SessionStartResult>;
@@ -11052,20 +11174,21 @@ declare module 'claude-code' {
    */
   export type PromptFilled = {
       /**
-       * True once the box holds the text; false where no box could take it or a
-       * hook kept it out (PromptFillResult).
+       * True once the box holds the text; false where no box could take it, a
+       * hook kept it out or no app answered (PromptFillResult).
        */
       isFilled: boolean;
       /**
        * Why the box did not take the text, when the engine itself refused
        * (PromptFillResult): `no_composer` where the session binds no box,
-       * `dialog` while one holds the keys. A hook's refusal carries none, so
-       * a caller choosing a fallback treats an absent cause as unknown and
-       * does not act as if no box existed.
+       * `dialog` while one holds the keys, `unanswered` where an app was asked
+       * and none answered, so the text may have landed. A hook's refusal carries
+       * none, so a caller choosing a fallback treats an absent cause as unknown
+       * and does not act as if no box existed.
        */
-      refusal?: 'no_composer' | 'dialog';
+      refusal?: 'no_composer' | 'dialog' | 'unanswered';
       /**
-       * The draft after the fill; unchanged when `isFilled` is false; `''` where
+       * The draft after the fill; unchanged when the fill was refused; `''` where
        * no box is drawn or the caller may not read it (see above).
        */
       text: string;
@@ -11163,24 +11286,25 @@ declare module 'claude-code' {
   export type PromptFillResult = {
       /**
        * True once the box holds the text; false where no box can take it (a
-       * dialog holds the keys, a headless session has none).
+       * dialog holds the keys, a headless session has none) or no app answered.
        *
        * A hook answering `{ isFilled: false }` without `next` keeps the text
        * out.
        */
       isFilled: boolean;
       /**
-       * Why the box did not take the text, on the two refusals the engine
-       * itself answers: the session binds no prompt box (`no_composer`:
-       * headless, or a surface that draws its own composer), or a dialog holds
-       * the keys (`dialog`), so the write would land under it, unseen. A hook's
-       * own refusal carries none: the site strips a cause a hook writes itself,
-       * keeping only one its `next` gave it, passed up as it was. A caller
+       * Why `isFilled` is false, on the three causes the engine itself
+       * answers: the session binds no prompt box (`no_composer`: headless, or a
+       * surface that draws its own composer), a dialog holds the keys
+       * (`dialog`), so the write would land under it, unseen, or an app was
+       * asked and none answered (`unanswered`), so the text may have landed. A
+       * hook's own refusal carries none: the site strips a cause a hook writes
+       * itself, keeping only one its `next` gave it, passed up as it was. A caller
        * branching on the cause treats an absent one as unknown and takes its
        * refusing arm; `no_composer` is the only value that says no box exists
        * to protect.
        */
-      refusal?: 'no_composer' | 'dialog';
+      refusal?: 'no_composer' | 'dialog' | 'unanswered';
   };
 
   /**
@@ -16169,7 +16293,7 @@ declare module 'claude-code' {
   export type TextHoverProps = {
       /**
        * Names a hover group of this plugin's: every element it draws with the
-       * same `scope`, in any site on the surface, lights while any is hovered.
+       * same `scope`, in any site but a `Backdrop`, lights while any is hovered.
        *
        * Another plugin's elements under the same string are a different group.
        * One to 64 characters, no control characters; no keyed Box needed. On the
@@ -16274,6 +16398,17 @@ declare module 'claude-code' {
   };
 
   /**
+   * What plays on behind the session: 1 to 8 layers.
+   */
+  export type ThemeAmbience = {
+      layers: readonly (ThemeToneDrone | ThemeNoiseDrone | ThemeToneScatter | ThemeNoiseScatter)[];
+      /**
+       * How much room it rings in: 0 to 1. Absent, none.
+       */
+      reverb?: number;
+  };
+
+  /**
    * The `backdrop` attribute of `$.theme.set`: what is behind the conversation.
    * `scene` makes a live scene, and `color`, `gradient` or `vector` make a still
    * ground. All of them are pure vector, with no embedded pictures or fonts.
@@ -16304,6 +16439,48 @@ declare module 'claude-code' {
   };
 
   /**
+   * How the box around a part looks. Lengths are numbers of points.
+   */
+  interface ThemeBoxRule {
+      /**
+       * The flat color behind the words. Give it beside a `fill` too: it tells the
+       * app what the words sit on, and a sliced drawing can get it under its words.
+       */
+      backgroundColor?: ThemeStyleColor;
+      fill?: ThemeFill;
+      /**
+       * 0 to 64: one for every corner, or top left, top right, bottom right and
+       * bottom left.
+       */
+      radius?: number | readonly [number, number, number, number];
+      borderColor?: ThemeStyleColor;
+      /**
+       * 0 to 8. Absent beside a `borderColor`, 1.
+       */
+      borderWidth?: number;
+      /**
+       * `x` and `y` from -16 to 16, and `blur` from 0 to 32. Each is 0 when absent.
+       * A shadow that reaches the next row draws fainter.
+       */
+      shadow?: {
+          x?: number;
+          y?: number;
+          blur?: number;
+          color: ThemeStyleColor;
+      } | 'none';
+      /**
+       * 0 to 48, as every padding is. A side beats its axis, which beats this.
+       */
+      padding?: number;
+      paddingX?: number;
+      paddingY?: number;
+      paddingTop?: number;
+      paddingRight?: number;
+      paddingBottom?: number;
+      paddingLeft?: number;
+  }
+
+  /**
    * A color in a still `backdrop`. A surface uses a raw color as it is, works out a
    * name from the look's `colors` in the look's mode, or from the app's own colors where
    * the look gives none, and refuses the ground over anything else. Annotate a color kept
@@ -16326,6 +16503,11 @@ declare module 'claude-code' {
    * the leading `#` alone.
    *
    * The names are the design system's, so the type lists none. A surface keeps its own color for a token that is left out.
+   *
+   * The desktop app reads four more names, which color messages with no `style`:
+   * `bg-user-message` and `text-user-message` for the person's, and
+   * `bg-assistant-message` and `text-assistant-message` for Claude's. A message's
+   * own rule in `ThemeStyle` wins over them, and any rule may name them.
    */
   export type ThemeColorInputs = {
       [token: string]: `#${string}`;
@@ -16390,6 +16572,78 @@ declare module 'claude-code' {
   };
 
   /**
+   * A short sound: 1 to 8 layers that start together.
+   */
+  export type ThemeCue = {
+      layers: readonly (ThemeToneLayer | ThemeNoiseLayer)[];
+      /**
+       * How much room it rings in: 0 to 1. Absent, none.
+       */
+      reverb?: number;
+  };
+
+  /**
+   * A background that isn't one flat color.
+   */
+  type ThemeFill = {
+      gradient: ThemeFillGradient;
+      vector?: never;
+  } | {
+      vector: ThemeFillVector;
+      gradient?: never;
+  };
+
+  /**
+   * Colors that run across a part's box, as in a still `backdrop`.
+   */
+  interface ThemeFillGradient extends Omit<ThemeGradient, 'stops'> {
+      /**
+       * Two to 16 colors, evenly spaced, or `{ at, color }` with `at` from 0 to 1,
+       * in order.
+       */
+      stops: readonly (ThemeStyleColor | {
+          at: number;
+          color: ThemeStyleColor;
+      })[];
+  }
+
+  /**
+   * A drawing behind a part's words, as in a still `backdrop`.
+   */
+  interface ThemeFillVector extends Omit<ThemeVector, 'paths' | 'color'> {
+      /**
+       * 1 to 64 paths, filled unless `strokeWidth`, 0.1 to 64, strokes one. Each `d`
+       * is whole path data of at most 16,384 characters.
+       */
+      paths: readonly (string | {
+          d: string;
+          strokeWidth?: number;
+          color?: ThemeStyleColor;
+      })[];
+      /**
+       * Each path's color, where it names none of its own: a path with neither is
+       * refused.
+       */
+      color?: ThemeStyleColor;
+      /**
+       * Cuts the drawing in nine, so it frames a box of any size: the corners draw
+       * once, and the edges and middle stretch, or tile with `repeat`. One inset for
+       * every side, or top, right, bottom and left, in `viewBox` units: a point each
+       * unless `size` scales them, and 48 points at most. The drawing is then the
+       * box's whole shape, so `shadow` follows it, and `radius` and the border
+       * aren't painted. `backgroundColor` is painted only when the words are under
+       * 3:1 on a color of the drawing or on what lies behind it: then it goes over
+       * the drawing, under the words alone.
+       */
+      slice?: number | readonly [number, number, number, number];
+  }
+
+  /**
+   * A font every device has. `code` is the app's own font for code.
+   */
+  type ThemeGenericFont = 'sans' | 'serif' | 'mono' | 'code' | 'cursive';
+
+  /**
    * Colors that run across their box.
    */
   interface ThemeGradient extends ThemeTiling {
@@ -16452,6 +16706,97 @@ declare module 'claude-code' {
    * holds resolves too, typed as any string is (Color).
    */
   export type ThemeKey = 'text' | 'inverseText' | 'inactive' | 'subtle' | 'suggestion' | 'remember' | 'success' | 'error' | 'warning' | 'merged' | 'claude' | 'permission' | 'planMode' | 'autoAccept' | 'promptBorder' | 'bashBorder' | 'ide' | 'diffAdded' | 'diffRemoved' | 'diffAddedDimmed' | 'diffRemovedDimmed' | 'diffAddedWord' | 'diffRemovedWord';
+
+  /**
+   * How one hit starts and dies away.
+   */
+  type ThemeLayerEnvelope = {
+      /**
+       * Seconds to rise: 0.002 to 2. Absent, 0.005.
+       */
+      attack?: number;
+      /**
+       * Seconds to die away: 0.01 to 4. Absent, 0.4.
+       */
+      release?: number;
+  };
+
+  /**
+   * What every layer may say about how it sounds.
+   */
+  type ThemeLayerMix = {
+      /**
+       * How loud, beside the other layers: 0 to 1. Absent, 0.5. The app turns a
+       * loud sound down and never turns one up.
+       */
+      gain?: number;
+      /**
+       * Left (-1) to right (1). Absent, the middle.
+       */
+      pan?: number;
+      /**
+       * Shapes the tone at `hz`, 20 to 10,000. With `to`, it moves there over each
+       * note, or there and back over 16 seconds on a drone.
+       */
+      filter?: {
+          type: 'lowpass' | 'highpass' | 'bandpass';
+          hz: number;
+          to?: number;
+      };
+      /**
+       * Swells and fades `hz` times a second, 0.05 to 30, by `depth`, 0 to 1.
+       */
+      tremolo?: {
+          hz: number;
+          depth: number;
+      };
+  };
+
+  /**
+   * How a message looks. What it says of the words beats `Text`.
+   */
+  export interface ThemeMessageRule extends ThemeTypeRule, ThemeBoxRule {
+      /**
+       * Tilts the box clockwise: -3 to 3 degrees. A large box tilts less, and one
+       * in a view laid out as a chat feed doesn't tilt.
+       */
+      rotate?: number;
+  }
+
+  /**
+   * Noise without a break.
+   */
+  interface ThemeNoiseDrone extends ThemeLayerMix {
+      wave: ThemeNoiseWave;
+      drone: true;
+  }
+
+  /**
+   * A layer that is one burst of noise.
+   */
+  interface ThemeNoiseLayer extends ThemeLayerMix, ThemeLayerEnvelope {
+      wave: ThemeNoiseWave;
+  }
+
+  /**
+   * Bursts of noise that fall at random, `scatter` times a second on average: 0.02
+   * to 10.
+   */
+  interface ThemeNoiseScatter extends ThemeNoiseLayer {
+      scatter: number;
+  }
+
+  /**
+   * Hiss to rumble, brightest first, and `crackle`: the ticks of rain on leaves,
+   * a fire or gravel.
+   */
+  type ThemeNoiseWave = 'white' | 'pink' | 'brown' | 'crackle';
+
+  /**
+   * A pitch: a note name such as `C5`, `F#3` or `Bb2`, a number of hertz from 20 to
+   * 10,000, or 0 for a rest.
+   */
+  type ThemeNote = string | number;
 
   /**
    * What `$.theme.set` and `$.theme.clear` resolve to, and what a `theme.set` or
@@ -16549,7 +16894,141 @@ declare module 'claude-code' {
        * nothing.
        */
       colors?: ThemeColors;
+      /**
+       * An ambience and short cues, which the desktop app plays once the person turns
+       * the theme's sound on. Absent, the theme is silent.
+       */
+      sound?: ThemeSound;
+      /**
+       * How the desktop app draws the conversation's own rows: the type of messages,
+       * and the boxes around messages and tool calls. Absent, the app's own.
+       */
+      style?: ThemeStyle;
   };
+
+  /**
+   * The `sound` attribute of `$.theme.set`: what the desktop app plays, on the
+   * person's own device, once they turn the theme's sound on.
+   *
+   * It's numbers, never a recording: the app makes the sound from them. A sound
+   * out of range, or too much to work out, is refused with what to change: long
+   * releases, many notes and reverb cost the most. To change the mood, set the
+   * theme again: a new ambience fades in over the old.
+   * The mod is never told whether the sound played. A build that doesn't take
+   * `sound`, such as an older one, refuses the whole set, so catch that and set
+   * the theme again without it.
+   *
+   * @example
+   * await $.theme.set({
+   *   backdrop: { scene: "pond" },
+   *   sound: {
+   *     ambience: { layers: [{ wave: "pink", drone: true, gain: 0.3 }] },
+   *     cues: {
+   *       done: { layers: [{ wave: "bell", notes: ["E5", "G5", "C6"], step: 0.1 }] },
+   *     },
+   *   },
+   * })
+   */
+  export type ThemeSound = {
+      /**
+       * Plays while the person is using the session's window. It stops while a
+       * permission prompt or a question waits, and during dictation, a voice call or
+       * a reply read aloud. Where the theme has cues too, the person can turn the
+       * ambience off and keep them.
+       */
+      ambience?: ThemeAmbience;
+      /**
+       * What the app plays by itself at each of these moments.
+       */
+      cues?: {
+          /**
+           * The person sent a message.
+           */
+          send?: ThemeCue;
+          /**
+           * Claude began a tool call. It can come often, so keep it short and soft.
+           */
+          tool?: ThemeCue;
+          /**
+           * The conversation was compacted.
+           */
+          compact?: ThemeCue;
+          /**
+           * Claude finished its turn.
+           */
+          done?: ThemeCue;
+          /**
+           * A permission prompt or a question appeared.
+           */
+          ask?: ThemeCue;
+          /**
+           * The turn ended in an error.
+           */
+          error?: ThemeCue;
+          /**
+           * The person clicked the backdrop where no part of the app covers it. Each
+           * layer plays one of its notes, the first at the left edge and the last at
+           * the right, so it takes no `step`.
+           */
+          click?: ThemeCue;
+      };
+  };
+
+  /**
+   * The `style` attribute of `$.theme.set`: how the desktop app draws the
+   * conversation's own rows.
+   *
+   * The words stay the app's text, so selecting, copying, finding and screen
+   * readers work as they do with no theme. A permission prompt, a question and a
+   * code block keep the app's look. A value out of range is refused with what to
+   * change, as is a style of over 1,500 values or 65,536 characters. A rule whose
+   * words are under 3:1 on what lies behind them, in the mode showing, draws in
+   * the app's own colors, and the other rules still draw. Every color of a `fill`
+   * counts as behind them. Over a backdrop any color can be behind them, so a
+   * text color needs an opaque enough fill under it. The mod is never told
+   * whether the style drew. A build that doesn't take `style`, such as an older
+   * one, refuses the whole set, so catch that and set the theme again without it.
+   *
+   * @example
+   * await $.theme.set({
+   *   style: {
+   *     Text: { fontFamily: ["cursive"], fontSize: 18 },
+   *     UserMessage: { color: "#223", backgroundColor: "#fde68a", rotate: -1 },
+   *   },
+   * })
+   */
+  export type ThemeStyle = {
+      /**
+       * The words of both kinds of message.
+       */
+      Text?: ThemeTypeRule;
+      /**
+       * Headings in a message, every level alike.
+       */
+      Heading?: ThemeTypeRule;
+      /**
+       * The person's message. With a list of up to 4 rules, each message takes one
+       * of them and keeps it.
+       */
+      UserMessage?: ThemeMessageRule | readonly ThemeMessageRule[];
+      /**
+       * Each run of words in Claude's reply, which has no box until a rule gives it
+       * one. It takes a list as `UserMessage` does.
+       */
+      AssistantMessage?: ThemeMessageRule | readonly ThemeMessageRule[];
+      /**
+       * A tool call's row.
+       */
+      ToolUse?: ThemeToolRule;
+  };
+
+  /**
+   * A color in `style`: any `ThemeColor`, or one of the four message colors that
+   * `colors.inputs` may give for each mode (`ThemeColorInputs`). Where the mode
+   * gives none, a `bg-` name draws as `surface-2` and a `text-` name as
+   * `text-primary`.
+   */
+  type ThemeStyleColor = ThemeColor | 'bg-user-message' | 'text-user-message' | 'bg-assistant-message' | 'text-assistant-message';
 
   /**
    * How a drawing or a gradient lies in its box.
@@ -16566,6 +17045,93 @@ declare module 'claude-code' {
        * Absent, a drawing or a gradient stretches to the box.
        */
       repeat?: boolean;
+  }
+
+  /**
+   * Notes held together without a break.
+   */
+  interface ThemeToneDrone extends ThemeLayerMix {
+      wave: ThemeToneWave;
+      /**
+       * 1 to 16.
+       */
+      notes: readonly ThemeNote[];
+      drone: true;
+  }
+
+  /**
+   * A layer that plays its notes and ends, within 4 seconds.
+   */
+  interface ThemeToneLayer extends ThemeLayerMix, ThemeLayerEnvelope {
+      wave: ThemeToneWave;
+      /**
+       * 1 to 16.
+       */
+      notes: readonly ThemeNote[];
+      /**
+       * Seconds from one note to the next: 0 to 2. Absent, a cue plays the notes
+       * together, and a scatter picks one for each hit.
+       */
+      step?: number;
+      /**
+       * Semitones each note slides by over its life: -24 to 24.
+       */
+      glide?: number;
+  }
+
+  /**
+   * Notes that fall at random, `scatter` times a second on average: 0.02 to 10.
+   */
+  interface ThemeToneScatter extends ThemeToneLayer {
+      scatter: number;
+  }
+
+  /**
+   * What a note is played on.
+   */
+  type ThemeToneWave = 'sine' | 'triangle' | 'square' | 'saw' | 'bell';
+
+  /**
+   * How a tool call's row looks: its box, and the color and generic font of its
+   * words.
+   */
+  export interface ThemeToolRule extends ThemeBoxRule {
+      /**
+       * Over a backdrop, this draws only on an opaque enough fill.
+       */
+      color?: ThemeStyleColor;
+      fontFamily?: readonly [ThemeGenericFont];
+  }
+
+  /**
+   * How a part's words look. Lengths are numbers of points, and a property left
+   * out keeps the app's own value.
+   */
+  export interface ThemeTypeRule {
+      /**
+       * Over a backdrop, this draws only on an opaque enough fill.
+       */
+      color?: ThemeStyleColor;
+      /**
+       * A list of one generic font, such as `["serif"]`. The person's accessibility
+       * settings win (a font, higher contrast), and the app tells them so.
+       */
+      fontFamily?: readonly [ThemeGenericFont];
+      /**
+       * 11 to 28.
+       */
+      fontSize?: number;
+      fontWeight?: 'regular' | 'medium' | 'semibold' | 'bold';
+      italic?: boolean;
+      /**
+       * -1 to 4.
+       */
+      letterSpacing?: number;
+      /**
+       * 12 to 48, and no less than `fontSize`. It's points, not a multiple: `24`,
+       * never `1.5`.
+       */
+      lineHeight?: number;
   }
 
   /**
@@ -18159,22 +18725,24 @@ declare module 'claude-code' {
       isCopied: true;
   } | {
       /**
-       * False: nothing was copied.
+       * False: nothing was copied, or with `unanswered` nothing says it was.
        */
       isCopied: false;
       /**
-       * Why not, a closed set: `no-surface`, `no-clipboard` or `refused`; a
-       * hook above answering without copying says `refused`.
+       * Why not, a closed set: `no-surface`, `no-clipboard`, `unanswered` or
+       * `refused`; a hook above answering without copying says `refused`.
        *
        * `no-surface`: nothing draws (a `-p` run, the SDK), or the named
        * surface is not attached. `no-clipboard`: it draws but nothing was
        * written (no clipboard tool ran and OSC 52 was past its bound or left
-       * out, as for VTE before 0.53; a remote app declined or was silent).
+       * out, as for VTE before 0.53; a remote app declined or was not asked).
+       * `unanswered`: a remote app was asked and none answered, so the copy
+       * may have landed. A hook's `{ value }` passes up as the hook wrote it.
        *
        * @example
        * on('ui.copy', { surface: 'mobile' }, () => ({ value: REFUSED }))
        */
-      reason: 'no-surface' | 'no-clipboard' | 'refused';
+      reason: 'no-surface' | 'no-clipboard' | 'unanswered' | 'refused';
   };
 
   /**
